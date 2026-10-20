@@ -21,7 +21,7 @@
 | Integrante |
 |---|
 | Jacobo Arenas |
-| Michael Steven |
+| Michael Calderon |
 | Mera Ruiz |
 | Ivan |
  
