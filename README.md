@@ -76,7 +76,7 @@ Resuelve el problema principal del proyecto y funciona en dos modalidades:
  
 - **Busco rival:** un equipo completo busca otro equipo para jugar.
 - **Faltan jugadores:** un equipo incompleto busca jugadores sueltos.
-### Tecnologías sugeridas (el equipo puede cambiarlas)
+### Tecnologías sugeridas (no claras todavia)
  
 | Capa | Tecnología |
 |---|---|
@@ -388,7 +388,7 @@ La entidad "hija" es la que contiene la llave foránea. Salvo que se indique otr
  
 ```
 CanchaYa/
-├── frontend/      # Aplicación web (React)
+├── frontend/      # Aplicación web
 ├── backend/       # API REST por capas
 ├── database/      # Scripts de migración y datos de prueba (seed)
 ├── docs/          # Documentación del proyecto
