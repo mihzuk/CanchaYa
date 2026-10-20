@@ -13,7 +13,6 @@
 5. [Modelado de la base de datos (Diagrama Entidad-Relación)](#5-modelado-de-la-base-de-datos-diagrama-entidad-relación)
 6. [Estructura del repositorio](#6-estructura-del-repositorio)
 7. [Instalación y ejecución](#7-instalación-y-ejecución)
-8. [Licencia](#8-licencia)
 ---
  
 ## 1. Idea de desarrollo web
