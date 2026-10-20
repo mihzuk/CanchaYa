@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: CanchaYa API
+  version: 0.1.0
+  description: |
+    API REST de CanchaYa. Se documenta aquí cada endpoint a medida que se implementa (HT-03, DoD de cada historia).
+
+    Autenticación: `Authorization: Bearer <token>` (JWT de 2 horas).
+    Errores: `{ "error": { "codigo", "mensaje", "detalles?" } }` con códigos HTTP 400, 401, 403, 404, 409 y 500.
+servers:
+  - url: http://localhost:3000/api
+tags:
+  - name: Auth            # EP-01
+  - name: Complejos       # EP-02
+  - name: Reservas        # EP-03
+  - name: Pagos           # EP-04
+  - name: Equipos         # EP-05
+  - name: Busca Partido   # EP-06
+  - name: Notificaciones  # EP-07
+  - name: Calificaciones  # EP-08
+  - name: Administración  # EP-09
+paths: {}
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
