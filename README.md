@@ -14,7 +14,6 @@
 6. [Modelado de la base de datos (Diagrama Entidad-Relación)](#6-modelado-de-la-base-de-datos-diagrama-entidad-relación)
 7. [Estructura del repositorio](#7-estructura-del-repositorio)
 8. [Instalación y ejecución](#8-instalación-y-ejecución)
-9. [Licencia](#9-licencia)
 ---
  
 ## 1. Integrantes
