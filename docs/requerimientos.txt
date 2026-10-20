@@ -1,0 +1,883 @@
+================================================================================
+                 CANCHAYA - SISTEMA WEB DE ALQUILER DE CANCHAS SINTETICAS
+                         DOCUMENTO DE REQUERIMIENTOS
+================================================================================
+
+Materia:        Desarrollo de Software 2
+Integrantes:    Jacobo Arenas - Michael Stevens - Mera Ruiz - Ivan
+Metodologia:    Agil (Scrum)
+Version:        1.1 (20 de octubre de 2026)
+
+--------------------------------------------------------------------------------
+DESCRIPCION DEL PROYECTO
+--------------------------------------------------------------------------------
+CanchaYa es una aplicacion web para reservar canchas sinteticas por horario y
+cancha especifica. Ademas conecta equipos incompletos mediante el modulo
+"Busca Equipo / Busca Partido", para que ninguna reserva se pierda por falta de
+jugadores.
+
+Problema: los complejos deportivos administran las reservas por WhatsApp o en
+cuaderno, lo que genera cruces de horario, cancelaciones de ultima hora y
+canchas vacias. Ademas, muchos grupos solo reunen 5 jugadores y no pueden
+completar un partido de futbol 5 vs 5.
+
+Objetivo general: desarrollar una plataforma web que permita a los complejos
+deportivos administrar sus canchas, horarios y reservas, y a los jugadores
+reservar en linea y encontrar rivales o jugadores faltantes para completar sus
+partidos.
+
+Alcance: registro de usuarios, gestion de complejos y canchas, reservas,
+equipos, Busca Partido, pagos (registro de abonos), notificaciones,
+calificaciones y reportes. Queda fuera de esta version: app movil nativa,
+torneos completos con fixture y pasarela de pagos real (se simula y se deja
+preparada para integracion futura).
+
+Convenciones:
+- Formato HU: Como [rol] quiero [accion] para [beneficio].
+- Criterios de aceptacion: Dado / Cuando / Entonces (Gherkin).
+- Codigos: EP-XX (epica), HU-XX (historia de usuario), HT-XX (historia
+  tecnica), RN-XX (regla de negocio), RNF-XX (requisito no funcional).
+- Prioridad MoSCoW: Alta = Must, Media = Should, Baja = Could.
+- Estimacion: puntos de historia en escala Fibonacci (1, 2, 3, 5, 8, 13).
+
+
+################################################################################
+#                                                                              #
+#   1. REQUERIMIENTOS FUNCIONALES (HISTORIAS DE USUARIO - EPICAS)              #
+#                                                                              #
+################################################################################
+
+1.1 ROLES DEL SISTEMA
+--------------------------------------------------------------------------------
+- Visitante: persona sin cuenta. Puede ver complejos, canchas, tarifas y
+  disponibilidad, y registrarse.
+- Jugador: usuario registrado. Puede reservar, pagar, cancelar, unirse a
+  equipos y partidos abiertos, y calificar.
+- Capitan de equipo: jugador que crea y administra un equipo. Puede invitar o
+  expulsar miembros, publicar en Busca Partido y aceptar rivales.
+- Administrador del complejo: dueno o encargado de una sede. Gestiona canchas,
+  horarios, tarifas, reservas, pagos, bloqueos y reportes de su complejo.
+- Superadministrador: administrador de la plataforma. Aprueba complejos,
+  gestiona usuarios, modera reportes y configura parametros globales.
+
+
+1.2 EPICAS
+--------------------------------------------------------------------------------
+Codigo | Epica                                       | Historias      | Prioridad
+-------+---------------------------------------------+----------------+----------
+EP-01  | Usuarios y autenticacion                    | HU-01 a HU-04  | Alta
+EP-02  | Complejos, canchas y horarios               | HU-05 a HU-09  | Alta
+EP-03  | Reservas                                    | HU-10 a HU-15  | Alta
+EP-04  | Pagos y cancelaciones                       | HU-16 a HU-18  | Alta
+EP-05  | Equipos                                     | HU-19 a HU-21  | Alta
+EP-06  | Busca Equipo / Busca Partido                | HU-22 a HU-27  | Alta
+EP-07  | Notificaciones                              | HU-28 a HU-29  | Media
+EP-08  | Calificaciones y reputacion                 | HU-30 a HU-31  | Media
+EP-09  | Reportes y administracion de la plataforma  | HU-32 a HU-33  | Media
+
+
+1.3 HISTORIAS DE USUARIO
+--------------------------------------------------------------------------------
+
+================================================================
+EP-01 - USUARIOS Y AUTENTICACION
+================================================================
+
+HU-01 - Registro de usuario
+Como visitante quiero crear una cuenta con mis datos para poder reservar
+canchas y unirme a partidos.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que estoy en el formulario de registro, cuando ingreso nombres,
+     apellidos, correo, celular, fecha de nacimiento y contrasena validos,
+     entonces se crea mi cuenta con rol Jugador.
+  2. Dado que el correo ya esta registrado, cuando intento registrarme,
+     entonces el sistema muestra "El correo ya esta en uso".
+  3. Dado que la contrasena tiene menos de 8 caracteres o no incluye un numero,
+     cuando envio el formulario, entonces se muestra el error y no se crea la
+     cuenta.
+  4. Dado que me registre, cuando termina el proceso, entonces recibo un correo
+     de verificacion.
+
+HU-02 - Inicio y cierre de sesion
+Como usuario registrado quiero iniciar sesion con correo y contrasena para
+acceder a mis reservas y equipos.
+Prioridad: Alta | Estimacion: 2 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que ingreso credenciales correctas, cuando presiono "Ingresar",
+     entonces accedo al panel segun mi rol (jugador o administrador).
+  2. Dado que fallo la contrasena 5 veces seguidas, cuando intento de nuevo,
+     entonces la cuenta se bloquea 15 minutos.
+  3. Dado que estoy dentro, cuando presiono "Cerrar sesion", entonces mi sesion
+     termina y vuelvo al inicio.
+
+HU-03 - Recuperar contrasena
+Como usuario quiero restablecer mi contrasena por correo para recuperar el
+acceso si la olvido.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que ingreso mi correo registrado, cuando solicito recuperar, entonces
+     recibo un enlace valido por 30 minutos.
+  2. Dado que el enlace expiro, cuando lo abro, entonces el sistema me pide
+     solicitar uno nuevo.
+
+HU-04 - Perfil de jugador
+Como jugador quiero completar mi perfil con foto, posicion preferida y nivel
+de juego para que otros equipos sepan como juego cuando me una a un partido.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que edito mi perfil, cuando elijo posicion (arquero, defensa, medio,
+     delantero) y nivel (principiante, intermedio, avanzado), entonces se
+     guardan y se muestran en mi perfil publico.
+  2. Dado que otro usuario ve mi perfil, cuando lo abre, entonces ve mis
+     partidos jugados, mi calificacion de fair play y mis equipos, pero no mi
+     celular ni correo.
+
+================================================================
+EP-02 - COMPLEJOS, CANCHAS Y HORARIOS
+================================================================
+
+HU-05 - Registrar complejo deportivo
+Como administrador del complejo quiero registrar mi sede con nombre,
+direccion, ciudad, telefono, fotos y servicios para publicarla en la
+plataforma.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que completo los datos obligatorios, cuando guardo, entonces el
+     complejo queda en estado "Pendiente de aprobacion".
+  2. Dado que el superadministrador lo aprueba, cuando cambia a "Activo",
+     entonces aparece en las busquedas.
+  3. Dado que registro servicios (parqueadero, camerinos, cafeteria, alquiler
+     de petos/balon), cuando un jugador ve el complejo, entonces los ve como
+     etiquetas.
+
+HU-06 - Registrar canchas
+Como administrador del complejo quiero registrar cada cancha de mi sede con su
+tipo y caracteristicas para que los jugadores elijan en cual jugar.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que creo una cancha, cuando indico nombre (ej. "Cancha 1"), tipo
+     (Futbol 5, 6, 7, 8 u 11), superficie, si es techada y si tiene
+     iluminacion, entonces queda asociada a mi complejo.
+  2. Dado que un complejo tiene varias canchas, cuando un jugador consulta
+     disponibilidad, entonces ve la disponibilidad de cada cancha por separado.
+  3. Dado que desactivo una cancha, cuando guardo, entonces deja de aparecer en
+     busquedas pero conserva su historial de reservas.
+
+HU-07 - Configurar horarios de atencion
+Como administrador del complejo quiero definir los dias y horas de apertura y
+la duracion de cada turno para que el sistema genere las franjas reservables.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que configuro lunes a viernes de 8:00 a 23:00 con turnos de 60
+     minutos, cuando guardo, entonces el sistema genera las franjas 8:00-9:00,
+     9:00-10:00 ... 22:00-23:00.
+  2. Dado que un dia festivo tiene horario especial, cuando lo registro,
+     entonces ese horario reemplaza al habitual solo en esa fecha.
+  3. Dado que cambio el horario, cuando ya existen reservas fuera del nuevo
+     horario, entonces el sistema me avisa y no las elimina automaticamente.
+
+HU-08 - Definir tarifas
+Como administrador del complejo quiero fijar precios por cancha segun dia y
+franja horaria para cobrar distinto en horas pico.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que defino tarifa diurna (ej. $80.000) y nocturna desde las 18:00
+     (ej. $120.000), cuando un jugador elige una franja, entonces ve el precio
+     correcto.
+  2. Dado que defino una tarifa de fin de semana, cuando la fecha es sabado,
+     domingo o festivo, entonces se aplica esa tarifa.
+  3. Dado que cambio una tarifa, cuando ya hay reservas confirmadas, entonces
+     esas reservas conservan el precio con el que se hicieron.
+
+HU-09 - Bloquear horarios
+Como administrador del complejo quiero bloquear una cancha en ciertas fechas y
+horas para hacer mantenimiento o eventos privados.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Dado que bloqueo la Cancha 2 el sabado de 8:00 a 12:00 con motivo
+     "Mantenimiento", cuando un jugador consulta, entonces esas franjas
+     aparecen como no disponibles.
+  2. Dado que existe una reserva en el rango a bloquear, cuando intento
+     bloquear, entonces el sistema me lo advierte y me pide reprogramar o
+     cancelar esa reserva primero.
+
+================================================================
+EP-03 - RESERVAS
+================================================================
+
+HU-10 - Consultar disponibilidad
+Como jugador quiero buscar canchas disponibles filtrando por fecha, hora, tipo
+de cancha y ubicacion para encontrar rapido donde jugar.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que elijo fecha, franja horaria y tipo "Futbol 5", cuando busco,
+     entonces veo los complejos con canchas libres, su precio y distancia.
+  2. Dado que abro un complejo, cuando selecciono una fecha, entonces veo una
+     grilla por cancha con franjas libres (verde), reservadas (rojo),
+     bloqueadas (gris) y con partido abierto en Busca Partido (amarillo).
+  3. Dado que no hay resultados, cuando termina la busqueda, entonces el
+     sistema sugiere franjas cercanas disponibles.
+
+HU-11 - Reservar una cancha
+Como jugador quiero reservar una cancha especifica en una franja horaria para
+asegurar mi espacio de juego.
+Prioridad: Alta | Estimacion: 8 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que la franja esta libre, cuando la selecciono y confirmo, entonces
+     se crea una reserva en estado "Pendiente de pago" y la franja queda
+     retenida 15 minutos.
+  2. Dado que pago el abono dentro de los 15 minutos, cuando se registra el
+     pago, entonces la reserva pasa a "Confirmada" y recibo un codigo de
+     reserva.
+  3. Dado que no pago en 15 minutos, cuando vence el tiempo, entonces la
+     reserva pasa a "Expirada" y la franja se libera.
+  4. Dado que dos usuarios intentan reservar la misma cancha y franja al mismo
+     tiempo, cuando ambos confirman, entonces solo una reserva se crea y el
+     otro recibe un aviso de no disponibilidad.
+  5. Dado que reservo, cuando confirmo, entonces puedo marcar la opcion
+     "Publicar en Busca Partido" (ver HU-22).
+
+HU-12 - Cancelar o reprogramar reserva
+Como jugador quiero cancelar o mover mi reserva a otra franja para no perder
+mi dinero si surge un imprevisto.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que faltan mas de 24 horas, cuando cancelo, entonces la reserva pasa
+     a "Cancelada" y se genera un reembolso del 100 % del abono.
+  2. Dado que faltan entre 6 y 24 horas, cuando cancelo, entonces se reembolsa
+     el 50 %; con menos de 6 horas no hay reembolso (RN-05).
+  3. Dado que reprogramo con mas de 24 horas de anticipacion a una franja
+     libre, cuando confirmo, entonces el abono se traslada a la nueva reserva
+     sin costo.
+  4. Dado que la reserva tenia un partido abierto con rival confirmado, cuando
+     cancelo, entonces el equipo rival recibe una notificacion.
+
+HU-13 - Ver mis reservas
+Como jugador quiero ver mis reservas proximas e historial para llevar control
+de mis partidos y pagos.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que entro a "Mis reservas", cuando cargo la pagina, entonces veo las
+     proximas ordenadas por fecha con complejo, cancha, hora, estado y saldo
+     pendiente.
+  2. Dado que cambio a la pestana "Historial", cuando la abro, entonces veo las
+     reservas pasadas, canceladas y expiradas.
+
+HU-14 - Gestionar reservas del complejo
+Como administrador del complejo quiero ver el calendario de todas mis canchas
+y crear reservas manuales para registrar a clientes que reservan por telefono
+o en persona.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que abro el calendario, cuando elijo un dia, entonces veo todas las
+     canchas en columnas y las reservas en sus franjas.
+  2. Dado que creo una reserva manual con nombre y celular del cliente, cuando
+     guardo, entonces la franja queda ocupada para todos los usuarios.
+  3. Dado que un equipo no se presento, cuando marco la reserva como "No
+     asistio", entonces se registra en el historial del usuario (RN-07).
+  4. Dado que el partido termino, cuando marco "Completada", entonces la
+     reserva se cierra.
+
+HU-15 - Reserva recurrente (cancha fija)
+Como jugador quiero reservar la misma cancha y franja cada semana para
+asegurar el partido fijo de mi grupo.
+Prioridad: Baja | Estimacion: 5 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Dado que elijo "Repetir cada semana" por 4, 8 o 12 semanas, cuando
+     confirmo, entonces se crean todas las reservas individuales vinculadas a
+     una reserva recurrente.
+  2. Dado que alguna fecha ya esta ocupada, cuando creo la recurrencia,
+     entonces el sistema me muestra cuales fechas no se pudieron reservar.
+  3. Dado que cancelo una sola fecha, cuando confirmo, entonces las demas se
+     mantienen.
+
+================================================================
+EP-04 - PAGOS Y CANCELACIONES
+================================================================
+
+HU-16 - Pagar abono de la reserva
+Como jugador quiero pagar un abono en linea para confirmar mi reserva sin ir
+al complejo.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que tengo una reserva pendiente, cuando pago el abono (por defecto
+     50 % del valor, configurable por el complejo), entonces el pago queda
+     registrado con fecha, metodo, valor y referencia.
+  2. Dado que el pago es rechazado, cuando vuelvo a la reserva, entonces sigue
+     en "Pendiente de pago" y puedo reintentar mientras no expire.
+  3. Dado que el pago se aprueba, cuando termina, entonces recibo un
+     comprobante por correo.
+
+HU-17 - Registrar pagos en el complejo
+Como administrador del complejo quiero registrar el pago del saldo en efectivo
+o transferencia para cerrar las cuentas de cada reserva.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Dado que el cliente paga el saldo en la cancha, cuando registro el pago
+     con su metodo, entonces la reserva queda "Pagada" y el saldo en $0.
+  2. Dado que un partido de Busca Partido divide el valor entre dos equipos,
+     cuando registro pagos, entonces veo cuanto ha pagado cada equipo (HU-26).
+
+HU-18 - Gestionar reembolsos
+Como administrador del complejo quiero ver y aprobar los reembolsos generados
+por cancelaciones para cumplir la politica de cancelacion.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que una cancelacion genera reembolso, cuando entro a "Reembolsos",
+     entonces lo veo con valor, motivo y estado "Pendiente".
+  2. Dado que apruebo el reembolso, cuando lo marco "Reembolsado", entonces el
+     jugador recibe una notificacion.
+
+================================================================
+EP-05 - EQUIPOS
+================================================================
+
+HU-19 - Crear equipo
+Como jugador quiero crear un equipo con nombre, escudo, nivel y tipo de futbol
+para jugar e inscribirme en partidos como equipo.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que creo un equipo con nombre unico, nivel (principiante,
+     intermedio, avanzado) y modalidad (Futbol 5, 7, etc.), cuando guardo,
+     entonces el equipo queda creado y yo quedo como capitan.
+  2. Dado que el nombre ya existe, cuando intento guardar, entonces el sistema
+     me pide otro nombre.
+
+HU-20 - Invitar y unirse a un equipo
+Como capitan quiero invitar jugadores a mi equipo por enlace o por usuario
+para armar mi plantilla dentro de la plataforma.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que genero un enlace de invitacion, cuando un jugador registrado lo
+     abre y acepta, entonces queda como miembro del equipo.
+  2. Dado que invito a un usuario por su nombre de usuario, cuando el acepta la
+     invitacion, entonces aparece en la plantilla; si la rechaza, se me
+     notifica.
+  3. Dado que un jugador puede pertenecer a varios equipos, cuando se une a
+     otro, entonces conserva sus equipos anteriores.
+
+HU-21 - Administrar miembros del equipo
+Como capitan quiero ver, expulsar miembros y ceder la capitania para mantener
+mi equipo organizado.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que expulso a un miembro, cuando confirmo, entonces deja de ver las
+     reservas y partidos del equipo.
+  2. Dado que cedo la capitania a otro miembro, cuando el acepta, entonces pasa
+     a ser capitan y yo quedo como miembro.
+  3. Dado que soy el unico miembro y salgo del equipo, cuando confirmo,
+     entonces el equipo queda inactivo.
+
+================================================================
+EP-06 - BUSCA EQUIPO / BUSCA PARTIDO
+================================================================
+Este modulo resuelve el problema principal: grupos de 5 jugadores que no
+consiguen rival. Funciona en dos modalidades:
+  - "Busco rival": un equipo completo busca otro equipo.
+  - "Faltan jugadores": un equipo incompleto busca jugadores sueltos.
+
+HU-22 - Publicar partido abierto (busco rival)
+Como capitan quiero publicar mi reserva como partido abierto indicando que
+buscamos rival para completar el partido sin tener que conseguir las 10
+personas nosotros mismos.
+Prioridad: Alta | Estimacion: 8 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que tengo una reserva confirmada, cuando selecciono "Publicar en
+     Busca Partido", elijo mi equipo, nivel y una descripcion opcional,
+     entonces se crea un partido abierto en estado "Buscando rival".
+  2. Dado que publico el partido, cuando otros jugadores consultan, entonces
+     ven complejo, cancha, fecha, hora, nombre del equipo, nivel, calificacion
+     de fair play y valor a pagar por equipo.
+  3. Dado que el partido sigue sin rival 6 horas antes, cuando llega ese
+     momento, entonces recibo una alerta para decidir si mantengo, cancelo o
+     juego entre nosotros.
+  4. Dado que no tengo reserva aun, cuando publico "Busco partido" con fecha,
+     rango de horas y zona preferida, entonces se crea una solicitud sin
+     cancha que otro equipo con reserva puede aceptar.
+
+HU-23 - Explorar partidos abiertos
+Como jugador o capitan quiero ver la lista de partidos abiertos con filtros
+para encontrar uno que me sirva en horario, lugar y nivel.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que entro a Busca Partido, cuando filtro por fecha, rango de horas,
+     ciudad o barrio, modalidad y nivel, entonces veo solo los partidos que
+     cumplen los filtros.
+  2. Dado que un partido ya tiene rival confirmado, cuando busco, entonces ya
+     no aparece en la lista.
+  3. Dado que veo un partido, cuando lo abro, entonces veo el perfil del equipo
+     publicador y sus ultimos resultados y calificaciones.
+
+HU-24 - Postularse como equipo rival
+Como capitan quiero postular a mi equipo a un partido abierto para jugar
+contra ese equipo en ese horario.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que encuentro un partido abierto, cuando postulo a mi equipo,
+     entonces se crea una solicitud en estado "Pendiente" y el capitan
+     publicador es notificado.
+  2. Dado que el capitan publicador acepta mi solicitud, cuando confirma,
+     entonces el partido pasa a "Rival confirmado" y las demas solicitudes se
+     rechazan automaticamente.
+  3. Dado que el publicador activa "Aceptacion automatica", cuando el primer
+     equipo se postula, entonces queda confirmado sin aprobacion manual.
+  4. Dado que mi equipo tiene un partido a la misma hora, cuando intento
+     postular, entonces el sistema lo impide.
+
+HU-25 - Faltan jugadores (unirse individualmente)
+Como jugador sin equipo quiero unirme a un partido donde faltan jugadores para
+poder jugar aunque mi grupo no este completo.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Dado que un capitan publica "Faltan 2 jugadores" con posicion deseada
+     opcional, cuando consulto, entonces veo los cupos libres del partido.
+  2. Dado que me uno a un cupo, cuando el capitan me acepta, entonces quedo
+     inscrito como jugador invitado de ese partido y el numero de cupos
+     disminuye.
+  3. Dado que se llenan todos los cupos, cuando entra el ultimo jugador,
+     entonces el anuncio se cierra automaticamente.
+  4. Dado que el capitan define un aporte por jugador invitado (ej. $12.000),
+     cuando me inscribo, entonces veo ese valor antes de confirmar.
+
+HU-26 - Dividir el pago entre equipos
+Como capitan quiero que el valor de la cancha se divida entre mi equipo y el
+rival para que cada uno pague su parte de forma justa.
+Prioridad: Media | Estimacion: 5 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que el rival queda confirmado, cuando se cierra el emparejamiento,
+     entonces el sistema calcula el 50 % del valor total para cada equipo (o
+     el porcentaje acordado al publicar).
+  2. Dado que el rival debe pagar su abono, cuando no lo paga en 2 horas,
+     entonces su confirmacion se anula y el partido vuelve a "Buscando rival".
+  3. Dado que el rival cancela con menos de 6 horas, cuando ocurre, entonces
+     pierde su abono segun RN-05 y recibe una marca de cancelacion tardia.
+
+HU-27 - Chat del partido
+Como capitan o jugador inscrito quiero un chat del partido para coordinar
+detalles como color de camiseta o llegada.
+Prioridad: Baja | Estimacion: 5 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Dado que el partido tiene rival confirmado, cuando abro el partido,
+     entonces veo un chat con los miembros de ambos equipos y los jugadores
+     invitados.
+  2. Dado que envio un mensaje, cuando otro participante entra, entonces lo ve
+     con mi nombre y la hora de envio.
+  3. Dado que el partido termino hace mas de 24 horas, cuando abro el chat,
+     entonces esta en modo solo lectura.
+
+================================================================
+EP-07 - NOTIFICACIONES
+================================================================
+
+HU-28 - Notificaciones de reservas
+Como jugador quiero recibir notificaciones de confirmacion, recordatorio y
+cambios de mi reserva para no olvidar ni perder mis partidos.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que mi reserva se confirma, cuando se registra el pago, entonces
+     recibo una notificacion en la plataforma y por correo.
+  2. Dado que faltan 2 horas para mi partido, cuando llega ese momento,
+     entonces recibo un recordatorio.
+  3. Dado que el complejo cancela o mueve mi reserva, cuando ocurre, entonces
+     recibo una notificacion con el motivo.
+  4. Dado que tengo notificaciones sin leer, cuando entro a la plataforma,
+     entonces veo un contador en el icono de campana.
+
+HU-29 - Alertas de Busca Partido
+Como capitan quiero recibir alertas cuando se publique un partido compatible
+con mis preferencias para no perder oportunidades de jugar.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que guardo una preferencia (dias, rango de horas, zona, nivel),
+     cuando se publica un partido que coincide, entonces recibo una alerta.
+  2. Dado que un equipo se postula a mi partido o un jugador pide un cupo,
+     cuando ocurre, entonces recibo una notificacion para aceptar o rechazar.
+
+================================================================
+EP-08 - CALIFICACIONES Y REPUTACION
+================================================================
+
+HU-30 - Calificar el complejo
+Como jugador quiero calificar el complejo y la cancha despues de jugar para
+ayudar a otros jugadores a elegir.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que mi reserva esta "Completada", cuando entro a calificar, entonces
+     puedo dar de 1 a 5 estrellas y un comentario.
+  2. Dado que ya califique esa reserva, cuando intento calificar de nuevo,
+     entonces el sistema solo me deja editar mi calificacion.
+  3. Dado que un complejo tiene calificaciones, cuando aparece en busquedas,
+     entonces muestra su promedio y numero de resenas.
+
+HU-31 - Fair play y reporte de inasistencia
+Como capitan quiero calificar el fair play del equipo rival y reportar si no
+se presento para que la comunidad sepa con quien es confiable jugar.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Dado que el partido de Busca Partido termino, cuando califico al rival de
+     1 a 5 en puntualidad y fair play, entonces se actualiza su reputacion.
+  2. Dado que el rival no llego, cuando lo reporto como "No se presento" y el
+     administrador del complejo lo confirma, entonces el equipo recibe una
+     marca de inasistencia.
+  3. Dado que un equipo acumula 3 inasistencias en 60 dias, cuando intenta
+     publicar o postularse, entonces queda suspendido de Busca Partido por 15
+     dias (RN-08).
+  4. Dado que registramos el marcador final, cuando ambos capitanes lo
+     confirman, entonces queda en el historial de los dos equipos.
+
+================================================================
+EP-09 - REPORTES Y ADMINISTRACION DE LA PLATAFORMA
+================================================================
+
+HU-32 - Panel de reportes del complejo
+Como administrador del complejo quiero ver reportes de ocupacion, ingresos y
+cancelaciones para tomar decisiones sobre precios y horarios.
+Prioridad: Media | Estimacion: 8 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Dado que elijo un rango de fechas, cuando abro el panel, entonces veo el
+     porcentaje de ocupacion por cancha y por franja horaria.
+  2. Dado que consulto ingresos, cuando filtro por mes, entonces veo el total
+     cobrado, los abonos pendientes y los reembolsos.
+  3. Dado que consulto Busca Partido, cuando abro el reporte, entonces veo
+     cuantas reservas se completaron gracias a partidos emparejados.
+  4. Dado que necesito el reporte por fuera, cuando presiono "Exportar",
+     entonces descargo un archivo Excel o PDF.
+
+HU-33 - Administracion de la plataforma
+Como superadministrador quiero aprobar complejos, gestionar usuarios y
+atender reportes para mantener la calidad y seguridad de la plataforma.
+Prioridad: Media | Estimacion: 5 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Dado que hay complejos pendientes, cuando reviso uno, entonces puedo
+     aprobarlo o rechazarlo indicando el motivo.
+  2. Dado que un usuario recibe reportes por mal comportamiento, cuando lo
+     reviso, entonces puedo suspenderlo o desactivarlo.
+  3. Dado que entro a configuracion, cuando cambio parametros globales (tiempo
+     de retencion de reserva, porcentajes de reembolso), entonces aplican a
+     las nuevas reservas.
+
+
+1.4 REGLAS DE NEGOCIO
+--------------------------------------------------------------------------------
+Estas reglas aplican a todo el sistema y se validan en el backend.
+
+RN-01  Una cancha no puede tener dos reservas activas que se crucen en fecha y
+       hora (activas = pendiente de pago, confirmada o pagada).
+RN-02  Una reserva sin pago queda retenida maximo 15 minutos; despues pasa a
+       "Expirada" y libera la franja.
+RN-03  El abono minimo es el 50 % del valor de la reserva, salvo que el
+       complejo configure otro porcentaje.
+RN-04  El precio de una reserva queda fijo al confirmarse, aunque el complejo
+       cambie la tarifa despues.
+RN-05  Politica de cancelacion: mas de 24 h antes, reembolso del 100 % del
+       abono; entre 6 y 24 h, 50 %; menos de 6 h, sin reembolso.
+RN-06  Solo se pueden reservar franjas dentro del horario de atencion, no
+       bloqueadas y con hasta 30 dias de anticipacion.
+RN-07  Una reserva marcada "No asistio" no genera reembolso y suma una
+       inasistencia al usuario o equipo.
+RN-08  Un equipo con 3 inasistencias en 60 dias queda suspendido de Busca
+       Partido durante 15 dias.
+RN-09  Solo puede publicarse en Busca Partido una reserva confirmada con al
+       menos 3 horas de anticipacion al partido.
+RN-10  Un partido abierto admite un solo equipo rival confirmado; los cupos de
+       "Faltan jugadores" no pueden superar el tamano de la modalidad (ej. 10
+       jugadores en Futbol 5).
+RN-11  Un equipo no puede estar inscrito en dos partidos que se crucen en
+       horario.
+RN-12  Solo los participantes de un partido completado pueden calificar, una
+       vez por partido.
+
+
+################################################################################
+#                                                                              #
+#   2. REQUERIMIENTOS NO FUNCIONALES (DEFINITION OF DONE)                      #
+#                                                                              #
+################################################################################
+
+2.1 REQUISITOS NO FUNCIONALES
+--------------------------------------------------------------------------------
+RNF-01  Seguridad: contrasenas almacenadas con hash (bcrypt o similar);
+        comunicacion por HTTPS.
+RNF-02  Seguridad: control de acceso por roles; cada usuario solo ve y
+        modifica lo que su rol permite.
+RNF-03  Privacidad: cumplir la Ley 1581 de 2012 de proteccion de datos
+        personales (Colombia): aceptacion de terminos y tratamiento de datos
+        al registrarse.
+RNF-04  Rendimiento: la consulta de disponibilidad responde en menos de 2
+        segundos con hasta 100 usuarios simultaneos.
+RNF-05  Concurrencia: las reservas usan transacciones o bloqueos para evitar
+        dobles reservas de la misma franja.
+RNF-06  Usabilidad: diseno responsive (celular, tableta y computador).
+        Reservar no debe tomar mas de 4 pasos.
+RNF-07  Disponibilidad: el sistema debe estar disponible el 99 % del tiempo en
+        horario de operacion.
+RNF-08  Mantenibilidad: codigo en repositorio Git, arquitectura por capas
+        (frontend, API, base de datos) y pruebas unitarias en la logica de
+        reservas.
+RNF-09  Localizacion: interfaz en espanol, moneda en pesos colombianos (COP) y
+        zona horaria America/Bogota.
+
+
+2.2 DEFINITION OF DONE (DoD)
+--------------------------------------------------------------------------------
+Una historia (de usuario o tecnica) solo se considera terminada cuando cumple
+todos los puntos de su nivel; si falta uno, vuelve al backlog del sprint.
+
+NIVEL HISTORIA
+  [ ] 1. El codigo esta en el repositorio Git, en una rama propia, y fue
+         integrado a la rama principal mediante pull request.
+  [ ] 2. El codigo fue revisado por el otro integrante del equipo (revision
+         cruzada) y no tiene comentarios pendientes.
+  [ ] 3. Todos los criterios de aceptacion (Dado / Cuando / Entonces) fueron
+         probados y se cumplen.
+  [ ] 4. Las reglas de negocio relacionadas (RN-XX) se validan en el backend,
+         no solo en la interfaz.
+  [ ] 5. Existen pruebas unitarias para la logica nueva y todas las pruebas
+         del proyecto pasan.
+  [ ] 6. No hay errores criticos ni bloqueantes abiertos; los errores menores
+         quedan registrados en el backlog.
+  [ ] 7. La interfaz funciona en celular y computador (RNF-06) y muestra
+         mensajes de error claros en espanol.
+  [ ] 8. Los endpoints nuevos estan documentados en la documentacion de la API.
+  [ ] 9. Los cambios en la base de datos estan en un script de migracion y el
+         modelo E-R esta actualizado.
+
+NIVEL SPRINT
+  [ ] 1. Todas las historias comprometidas cumplen la DoD de nivel historia.
+  [ ] 2. El incremento esta desplegado y funcionando en el ambiente de pruebas.
+  [ ] 3. Se hizo la demostracion del sprint (sprint review) y se registraron
+         los ajustes solicitados.
+  [ ] 4. El backlog y la matriz de historias estan actualizados con el estado
+         real.
+
+NIVEL ENTREGA FINAL
+  [ ] 1. Se cumplen todos los requisitos no funcionales (RNF-01 a RNF-09).
+  [ ] 2. Se ejecuto una prueba completa de punta a punta: registro, reserva,
+         pago, Busca Partido y calificacion.
+  [ ] 3. Existe un manual de usuario basico y un README con los pasos para
+         instalar y ejecutar el proyecto.
+
+
+################################################################################
+#                                                                              #
+#   3. REQUERIMIENTOS TECNICOS (HISTORIAS TECNICAS)                            #
+#                                                                              #
+################################################################################
+
+Las historias tecnicas describen el trabajo de infraestructura que no ve el
+usuario final pero que hace posibles las historias de usuario.
+
+Tecnologias sugeridas (el equipo puede cambiarlas):
+  - Frontend: React
+  - Backend: Node.js con Express (o Java con Spring Boot)
+  - Base de datos: PostgreSQL o MySQL
+  - Despliegue: Docker y GitHub Actions
+
+HT-01 - Repositorio y estructura del proyecto
+Como equipo de desarrollo necesitamos un repositorio Git con la estructura
+frontend, backend y base de datos para trabajar en paralelo sin pisar el
+codigo del otro.
+Prioridad: Alta | Estimacion: 2 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Existe un repositorio con las carpetas /frontend, /backend y /database y
+     un README con instrucciones de instalacion.
+  2. Se usa la estrategia de ramas main, develop y feature/HU-XX, con
+     integracion por pull request.
+  3. Las variables sensibles (contrasenas, claves) estan en un archivo .env que
+     no se sube al repositorio.
+
+HT-02 - Base de datos relacional y migraciones
+Como equipo de desarrollo necesitamos implementar el modelo entidad-relacion
+en una base de datos relacional con scripts de migracion para que todos
+tengamos la misma estructura de datos.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Las 24 entidades del modelo E-R estan creadas con sus llaves primarias,
+     foraneas y restricciones.
+  2. Existe una restriccion o validacion que impide reservas activas que se
+     crucen en la misma cancha (RN-01).
+  3. Hay indices en los campos de busqueda frecuente: fecha de reserva, cancha,
+     ciudad y estado.
+  4. Existe un script de datos de prueba (seed) con complejos, canchas y
+     usuarios de ejemplo.
+
+HT-03 - API REST por capas y documentacion
+Como equipo de desarrollo necesitamos una API REST organizada en capas
+(controladores, servicios, repositorios) y documentada para que el frontend
+consuma los datos de forma ordenada.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Los endpoints siguen convenciones REST (GET, POST, PUT, DELETE) y
+     responden en JSON.
+  2. La API esta documentada con Swagger / OpenAPI y se puede probar desde el
+     navegador.
+  3. Los errores devuelven codigos HTTP correctos (400, 401, 403, 404, 409,
+     500) con un mensaje claro.
+
+HT-04 - Autenticacion y autorizacion por roles
+Como equipo de desarrollo necesitamos autenticacion con tokens JWT y control
+de acceso por rol para proteger la informacion de cada usuario (RNF-01,
+RNF-02).
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Las contrasenas se guardan con hash bcrypt; nunca en texto plano.
+  2. Al iniciar sesion se genera un token JWT con expiracion de 2 horas.
+  3. Cada endpoint valida el rol: un jugador no puede acceder a rutas de
+     administrador del complejo ni de superadministrador.
+  4. Tras 5 intentos fallidos la cuenta se bloquea 15 minutos (HU-02).
+
+HT-05 - Control de concurrencia en reservas
+Como equipo de desarrollo necesitamos manejar reservas simultaneas con
+transacciones para que nunca se reserve dos veces la misma franja (RNF-05).
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. La creacion de una reserva se ejecuta dentro de una transaccion que
+     verifica disponibilidad y bloquea la franja.
+  2. Una prueba automatizada que lanza 2 reservas simultaneas para la misma
+     franja confirma que solo una queda creada.
+  3. El usuario que pierde la franja recibe un error 409 con el mensaje "La
+     franja ya no esta disponible".
+
+HT-06 - Tareas programadas
+Como equipo de desarrollo necesitamos procesos automaticos que se ejecuten
+cada minuto para aplicar las reglas de tiempo del sistema.
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Las reservas pendientes de pago por mas de 15 minutos pasan a "Expirada"
+     (RN-02).
+  2. Se envian recordatorios 2 horas antes del partido (HU-28) y alertas de
+     partido sin rival 6 horas antes (HU-22).
+  3. Se anula la confirmacion del rival que no paga su abono en 2 horas
+     (HU-26).
+  4. Se levantan automaticamente las suspensiones de equipos cuando vence el
+     plazo (RN-08).
+
+HT-07 - Servicio de notificaciones
+Como equipo de desarrollo necesitamos un servicio central de notificaciones en
+la plataforma y por correo para que cualquier modulo pueda avisar a los
+usuarios.
+Prioridad: Media | Estimacion: 3 pts | Sprint: 4
+Criterios de aceptacion:
+  1. Las notificaciones se guardan en la tabla Notificacion y se marcan como
+     leidas.
+  2. Los correos se envian mediante SMTP con plantillas en espanol.
+  3. Si el envio de correo falla, se registra el error y la notificacion en la
+     plataforma igual se crea.
+
+HT-08 - Modulo de pagos simulado
+Como equipo de desarrollo necesitamos un modulo de pagos simulado detras de
+una interfaz comun para poder conectar una pasarela real (Wompi, PayU,
+Mercado Pago) en el futuro sin reescribir el sistema.
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Existe una interfaz de pagos con las operaciones cobrar, consultar estado
+     y reembolsar.
+  2. La implementacion simulada permite aprobar o rechazar pagos para probar
+     ambos flujos.
+  3. Cada pago queda registrado con referencia, valor, metodo y estado.
+
+HT-09 - Comunicacion en tiempo real
+Como equipo de desarrollo necesitamos WebSockets para el chat del partido y
+para actualizar la disponibilidad sin recargar la pagina.
+Prioridad: Baja | Estimacion: 5 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Los mensajes del chat (HU-27) llegan a los participantes en menos de 2
+     segundos.
+  2. Cuando se reserva una franja, la grilla de disponibilidad de otros
+     usuarios conectados se actualiza.
+  3. Solo los participantes del partido pueden conectarse a su sala de chat.
+
+HT-10 - Frontend responsive y componentes reutilizables
+Como equipo de desarrollo necesitamos una aplicacion web responsive con
+componentes reutilizables para mantener un diseno consistente en celular y
+computador (RNF-06).
+Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
+Criterios de aceptacion:
+  1. Existen componentes reutilizables para formularios, tarjetas de cancha,
+     grilla de horarios y notificaciones.
+  2. Las vistas se adaptan a anchos de 360 px (celular), 768 px (tableta) y
+     1280 px (computador).
+  3. Las rutas privadas redirigen al inicio de sesion si no hay token valido.
+
+HT-11 - Pruebas automatizadas
+Como equipo de desarrollo necesitamos pruebas unitarias y de integracion para
+detectar errores antes de entregar cada sprint.
+Prioridad: Alta | Estimacion: 5 pts | Sprints: 1 a 5
+Criterios de aceptacion:
+  1. La logica de reservas, pagos, cancelaciones y Busca Partido tiene una
+     cobertura de pruebas de al menos 70 %.
+  2. Hay pruebas de integracion para los endpoints principales de la API.
+  3. Las pruebas se ejecutan con un solo comando.
+
+HT-12 - Integracion continua y despliegue
+Como equipo de desarrollo necesitamos un pipeline de integracion continua y
+contenedores Docker para desplegar el sistema en el ambiente de pruebas de
+forma repetible.
+Prioridad: Media | Estimacion: 5 pts | Sprint: 2
+Criterios de aceptacion:
+  1. Cada pull request ejecuta automaticamente las pruebas (por ejemplo con
+     GitHub Actions) y no se integra si fallan.
+  2. El sistema completo (frontend, backend y base de datos) se levanta con
+     docker-compose.
+  3. Existe un ambiente de pruebas accesible por URL para las demostraciones
+     de sprint.
+
+HT-13 - Seguridad de la aplicacion
+Como equipo de desarrollo necesitamos proteger la aplicacion contra ataques
+comunes para cuidar los datos personales de los usuarios (RNF-01, RNF-03).
+Prioridad: Alta | Estimacion: 3 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Todas las entradas se validan en el backend; las consultas usan
+     parametros para evitar inyeccion SQL.
+  2. La salida se escapa para evitar XSS y la API solo acepta peticiones del
+     dominio del frontend (CORS).
+  3. El inicio de sesion tiene limite de peticiones por minuto.
+  4. La comunicacion se hace por HTTPS.
+
+HT-14 - Registro de eventos y manejo de errores
+Como equipo de desarrollo necesitamos logs y un manejo centralizado de errores
+para encontrar rapido la causa de los fallos.
+Prioridad: Media | Estimacion: 2 pts | Sprint: 3
+Criterios de aceptacion:
+  1. Los errores del backend se registran con fecha, endpoint, usuario y
+     detalle.
+  2. El usuario nunca ve mensajes tecnicos; ve un mensaje amigable.
+  3. Las acciones criticas (reservas, pagos, cancelaciones) quedan en un
+     registro de auditoria.
+
+HT-15 - Generacion de reportes y exportacion
+Como equipo de desarrollo necesitamos consultas agregadas y exportacion a
+Excel y PDF para construir el panel de reportes del complejo (HU-32).
+Prioridad: Media | Estimacion: 5 pts | Sprint: 5
+Criterios de aceptacion:
+  1. Las consultas de ocupacion e ingresos responden en menos de 3 segundos
+     para un ano de datos.
+  2. Los reportes se exportan en formato .xlsx y .pdf con el nombre del
+     complejo y el rango de fechas.
+
+
+RESUMEN DE HISTORIAS TECNICAS
+--------------------------------------------------------------------------------
+Codigo | Historia tecnica                             | Prioridad | Pts | Sprint
+-------+----------------------------------------------+-----------+-----+-------
+HT-01  | Repositorio y estructura del proyecto        | Alta      |  2  | 1
+HT-02  | Base de datos relacional y migraciones       | Alta      |  5  | 1
+HT-03  | API REST por capas y documentacion           | Alta      |  5  | 1
+HT-04  | Autenticacion y autorizacion por roles       | Alta      |  5  | 1
+HT-10  | Frontend responsive y componentes            | Alta      |  5  | 1
+HT-05  | Control de concurrencia en reservas          | Alta      |  5  | 2
+HT-06  | Tareas programadas                           | Alta      |  5  | 2
+HT-08  | Modulo de pagos simulado                     | Alta      |  3  | 2
+HT-12  | Integracion continua y despliegue            | Media     |  5  | 2
+HT-13  | Seguridad de la aplicacion                   | Alta      |  3  | 3
+HT-14  | Registro de eventos y manejo de errores      | Media     |  2  | 3
+HT-07  | Servicio de notificaciones                   | Media     |  3  | 4
+HT-09  | Comunicacion en tiempo real                  | Baja      |  5  | 5
+HT-15  | Generacion de reportes y exportacion         | Media     |  5  | 5
+HT-11  | Pruebas automatizadas                        | Alta      |  5  | 1 a 5
+
+
+================================================================================
+                                FIN DEL DOCUMENTO
+================================================================================
