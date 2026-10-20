@@ -1,0 +1,53 @@
+# Levanta todo el sistema para desarrollo:  docker-compose up
+#   Frontend  -> http://localhost:5173
+#   Backend   -> http://localhost:3000   (salud: /api/health)
+#   Postgres  -> localhost:5432
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-canchaya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-canchaya}
+      POSTGRES_DB: ${POSTGRES_DB:-canchaya}
+      TZ: America/Bogota
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-canchaya}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      MIGRATIONS_DIR: /database/migrations
+      SEEDS_DIR: /database/seeds
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend/src:/app/src
+      - ./database:/database
+    # Aplica las migraciones pendientes y arranca con recarga automática.
+    command: sh -c "npm run migrate && npm run dev"
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/src:/app/src
+
+volumes:
+  pgdata:

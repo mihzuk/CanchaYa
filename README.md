@@ -75,10 +75,18 @@ Resuelve el problema principal del proyecto y funciona en dos modalidades:
  
 - **Busco rival:** un equipo completo busca otro equipo para jugar.
 - **Faltan jugadores:** un equipo incompleto busca jugadores sueltos.
-### Tecnologías sugeridas (no claras todavia)
- 
+### Tecnologías
+
 | Capa | Tecnología |
 |---|---|
+| Frontend | React + TypeScript (Vite) |
+| Backend | Node.js + Express + TypeScript |
+| Base de datos | PostgreSQL 16 |
+| Despliegue | Docker y GitHub Actions |
+
+**Arquitectura:** monolito modular por capas (un módulo por épica). El detalle y el porqué de cada decisión están en [`docs/arquitectura.md`](docs/arquitectura.md).
+
+---|---|
 | Frontend | React |
 | Backend | Node.js con Express (o Java con Spring Boot) |
 | Base de datos | PostgreSQL o MySQL |
@@ -232,7 +240,7 @@ El backlog de historias de usuario suma **132 puntos** repartidos en **5 sprints
 | RNF-05 | Concurrencia | Las reservas usan transacciones o bloqueos para evitar dobles reservas de la misma franja. |
 | RNF-06 | Usabilidad | Diseño responsive (celular, tableta y computador). Reservar no debe tomar más de 4 pasos. |
 | RNF-07 | Disponibilidad | El sistema debe estar disponible el 99 % del tiempo en horario de operación. |
-| RNF-08 | Mantenibilidad | Código en repositorio Git, arquitectura por capas (frontend, API, base de datos) y pruebas unitarias en la lógica de reservas. |
+| RNF-08 | Mantenibilidad | Código en repositorio Git, arquitectura por capas (frontend, API, base de datos) con el backend como monolito modular (un módulo por épica, ver [`docs/arquitectura.md`](docs/arquitectura.md)) y pruebas unitarias en la lógica de reservas. |
 | RNF-09 | Localización | Interfaz en español, moneda en pesos colombianos (COP) y zona horaria America/Bogota. |
  
 ### 4.2 Definition of Done (DoD)
@@ -242,7 +250,7 @@ Una historia (de usuario o técnica) solo se considera terminada cuando cumple *
 **Nivel historia**
  
 - [ ] El código está en el repositorio Git, en una rama propia, y fue integrado a la rama principal mediante *pull request*.
-- [ ] El código fue revisado por el otro integrante del equipo (revisión cruzada) y no tiene comentarios pendientes.
+- [ ] El código fue revisado por al menos un compañero del equipo (revisión cruzada) y no tiene comentarios pendientes.
 - [ ] Todos los criterios de aceptación (Dado / Cuando / Entonces) fueron probados y se cumplen.
 - [ ] Las reglas de negocio relacionadas (RN-XX) se validan en el backend, no solo en la interfaz.
 - [ ] Existen pruebas unitarias para la lógica nueva y todas las pruebas del proyecto pasan.
@@ -269,9 +277,9 @@ Describen el trabajo de infraestructura que no ve el usuario final pero que hace
  
 | Código | Historia técnica | Prioridad | Pts | Sprint |
 |---|---|---|---|---|
-| HT-01 | **Repositorio y estructura del proyecto.** Repositorio Git con carpetas `/frontend`, `/backend` y `/database`, README con instrucciones, ramas `main`, `develop` y `feature/HU-XX`, y variables sensibles en `.env` fuera del repositorio. | Alta | 2 | 1 |
-| HT-02 | **Base de datos relacional y migraciones.** Implementar las 28 entidades del modelo E-R con llaves primarias, foráneas y restricciones; validación contra reservas cruzadas (RN-01); índices en fecha, cancha, ciudad y estado; script de datos de prueba (seed). | Alta | 5 | 1 |
-| HT-03 | **API REST por capas y documentación.** Controladores, servicios y repositorios; respuestas JSON, documentación Swagger / OpenAPI y códigos HTTP correctos (400, 401, 403, 404, 409, 500). | Alta | 5 | 1 |
+| HT-01 | **Repositorio y estructura del proyecto.** Repositorio Git con carpetas `/frontend`, `/backend`, `/database` y `/docs` (estructura en [`docs/estructura.md`](docs/estructura.md)), README con instrucciones, ramas `main`, `develop` y `feature/HU-XX`, y variables sensibles en `.env` fuera del repositorio. | Alta | 2 | 1 |
+| HT-02 | **Base de datos relacional y migraciones.** Implementar las 28 entidades del modelo E-R en migraciones SQL numeradas (`database/migrations`, ordenadas por las dependencias entre tablas) con llaves primarias, foráneas y restricciones; validación contra reservas cruzadas (RN-01); índices en fecha, cancha, ciudad y estado; script de datos de prueba (seed). | Alta | 5 | 1 |
+| HT-03 | **API REST por capas y documentación.** Rutas, controladores, servicios y repositorios dentro de cada módulo; respuestas JSON, documentación Swagger / OpenAPI (`backend/openapi.yaml`) y códigos HTTP correctos (400, 401, 403, 404, 409, 500). | Alta | 5 | 1 |
 | HT-04 | **Autenticación y autorización por roles.** Contraseñas con bcrypt, tokens JWT con expiración de 2 horas, validación de rol en cada endpoint y bloqueo de 15 minutos tras 5 intentos fallidos. | Alta | 5 | 1 |
 | HT-10 | **Frontend responsive y componentes reutilizables.** Componentes de formularios, tarjetas de cancha, grilla de horarios y notificaciones; vistas para 360, 768 y 1280 px; rutas privadas protegidas. | Alta | 5 | 1 |
 | HT-05 | **Control de concurrencia en reservas.** Transacciones que verifican y bloquean la franja, prueba automatizada con 2 reservas simultáneas y error 409 para quien pierde la franja. | Alta | 5 | 2 |
@@ -384,36 +392,86 @@ La entidad "hija" es la que contiene la llave foránea. Salvo que se indique otr
 ---
  
 ## 7. Estructura del repositorio
- 
+
 ```
 CanchaYa/
-├── frontend/      # Aplicación web
-├── backend/       # API REST por capas
-├── database/      # Scripts de migración y datos de prueba (seed)
-├── docs/          # Documentación del proyecto
+├── backend/                     # API REST (Node + Express + TypeScript)
+│   ├── src/
+│   │   ├── modules/             # un módulo por épica
+│   │   │   ├── auth/            #   EP-01 Usuarios y autenticación
+│   │   │   ├── venues/          #   EP-02 Complejos, canchas y horarios
+│   │   │   ├── bookings/        #   EP-03 Reservas
+│   │   │   ├── payments/        #   EP-04 Pagos y cancelaciones
+│   │   │   ├── teams/           #   EP-05 Equipos
+│   │   │   ├── matchmaking/     #   EP-06 Busca Equipo / Busca Partido
+│   │   │   ├── notifications/   #   EP-07 Notificaciones
+│   │   │   ├── ratings/         #   EP-08 Calificaciones y reputación
+│   │   │   └── admin/           #   EP-09 Reportes y administración
+│   │   ├── shared/              # configuración, base de datos, errores, seguridad, eventos
+│   │   ├── infrastructure/      # pagos, correo y tiempo real (adaptadores)
+│   │   └── jobs/                # tareas programadas
+│   ├── tests/                   # pruebas de integración
+│   └── openapi.yaml             # documentación de la API
+├── frontend/                    # Aplicación web (React + TypeScript)
+│   └── src/
+│       ├── features/            # una carpeta por épica
+│       ├── components/          # interfaz reutilizable
+│       └── lib/                 # cliente de la API, formato de fechas y moneda
+├── database/
+│   ├── migrations/              # migraciones SQL numeradas
+│   └── seeds/                   # datos de prueba
+├── docs/
 │   ├── requerimientos.txt
 │   ├── historias-de-usuario.docx
 │   ├── CanchaYa_Modelo_Entidad_Relacion.drawio
-│   └── modelo-er.png
-└── README.md
+│   ├── modelo-er.png
+│   ├── arquitectura.md          # decisiones de arquitectura y sus reglas
+│   ├── estructura.md            # qué hace cada archivo y qué historia lo llena
+│   └── convenciones.md          # ramas, commits, nombres y checklist de trabajo
+├── .github/                     # CI y plantilla de pull request
+├── docker-compose.yml
+└── .env.example
 ```
- 
+
 ---
  
 ## 8. Instalación y ejecución
- 
-> Pendiente: se completará cuando el proyecto tenga código (HT-01 y HT-12).
- 
+
+> El repositorio es hoy un **esqueleto**: los comandos de abajo ya están configurados, pero la aplicación no hace nada hasta que se implementen los archivos vacíos (ver [`docs/estructura.md`](docs/estructura.md)).
+
+### Con Docker
+
 ```bash
-# 1. Clonar el repositorio
 git clone https://github.com/<usuario>/<repositorio>.git
 cd <repositorio>
- 
-# 2. Crear el archivo de variables de entorno
-cp .env.example .env
- 
-# 3. Levantar todo el sistema (frontend, backend y base de datos)
+cp .env.example .env            # y cambia JWT_SECRET por un valor propio
 docker-compose up
 ```
- 
+
+- Frontend: http://localhost:5173
+- API: http://localhost:3000/api/health
+
+### Sin Docker
+
+Requiere Node.js 20 o superior y PostgreSQL 16.
+
+```bash
+cd backend && npm install
+npm run migrate                 # aplica database/migrations
+npm run dev                     # API en http://localhost:3000
+
+cd ../frontend && npm install
+npm run dev                     # web en http://localhost:5173
+```
+
+### Verificaciones (las mismas que corre el CI)
+
+```bash
+cd backend
+npm test                        # unitarias y de integración
+npm run typecheck               # tipos de TypeScript
+npm run check:boundaries        # reglas de arquitectura entre módulos
+cd ../frontend && npm run build # tipos y compilación
+```
+
 ---

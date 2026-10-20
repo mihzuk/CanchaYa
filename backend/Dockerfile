@@ -1,0 +1,13 @@
+# Imagen de desarrollo del backend (docker-compose monta ./backend/src y ./database).
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+
+EXPOSE 3000
+CMD ["npm", "run", "dev"]

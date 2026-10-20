@@ -613,8 +613,9 @@ RNF-06  Usabilidad: diseno responsive (celular, tableta y computador).
 RNF-07  Disponibilidad: el sistema debe estar disponible el 99 % del tiempo en
         horario de operacion.
 RNF-08  Mantenibilidad: codigo en repositorio Git, arquitectura por capas
-        (frontend, API, base de datos) y pruebas unitarias en la logica de
-        reservas.
+        (frontend, API, base de datos) con el backend como monolito modular
+        (un modulo por epica, ver docs/arquitectura.md) y pruebas unitarias
+        en la logica de reservas.
 RNF-09  Localizacion: interfaz en espanol, moneda en pesos colombianos (COP) y
         zona horaria America/Bogota.
 
@@ -627,7 +628,7 @@ todos los puntos de su nivel; si falta uno, vuelve al backlog del sprint.
 NIVEL HISTORIA
   [ ] 1. El codigo esta en el repositorio Git, en una rama propia, y fue
          integrado a la rama principal mediante pull request.
-  [ ] 2. El codigo fue revisado por el otro integrante del equipo (revision
+  [ ] 2. El codigo fue revisado por al menos un companero del equipo (revision
          cruzada) y no tiene comentarios pendientes.
   [ ] 3. Todos los criterios de aceptacion (Dado / Cuando / Entonces) fueron
          probados y se cumplen.
@@ -668,11 +669,13 @@ NIVEL ENTREGA FINAL
 Las historias tecnicas describen el trabajo de infraestructura que no ve el
 usuario final pero que hace posibles las historias de usuario.
 
-Tecnologias sugeridas (el equipo puede cambiarlas):
-  - Frontend: React
-  - Backend: Node.js con Express (o Java con Spring Boot)
-  - Base de datos: PostgreSQL o MySQL
+Tecnologias (decididas por el equipo):
+  - Frontend: React con TypeScript (Vite)
+  - Backend: Node.js con Express y TypeScript
+  - Base de datos: PostgreSQL 16
   - Despliegue: Docker y GitHub Actions
+Arquitectura: monolito modular por capas, un modulo por epica
+(ver docs/arquitectura.md).
 
 HT-01 - Repositorio y estructura del proyecto
 Como equipo de desarrollo necesitamos un repositorio Git con la estructura
@@ -680,8 +683,9 @@ frontend, backend y base de datos para trabajar en paralelo sin pisar el
 codigo del otro.
 Prioridad: Alta | Estimacion: 2 pts | Sprint: 1
 Criterios de aceptacion:
-  1. Existe un repositorio con las carpetas /frontend, /backend y /database y
-     un README con instrucciones de instalacion.
+  1. Existe un repositorio con las carpetas /frontend, /backend, /database y
+     /docs (estructura en docs/estructura.md) y un README con instrucciones de
+     instalacion.
   2. Se usa la estrategia de ramas main, develop y feature/HU-XX, con
      integracion por pull request.
   3. Las variables sensibles (contrasenas, claves) estan en un archivo .env que
@@ -693,8 +697,9 @@ en una base de datos relacional con scripts de migracion para que todos
 tengamos la misma estructura de datos.
 Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
 Criterios de aceptacion:
-  1. Las 24 entidades del modelo E-R estan creadas con sus llaves primarias,
-     foraneas y restricciones.
+  1. Las 28 entidades del modelo E-R estan creadas, en migraciones SQL
+     numeradas (database/migrations), con sus llaves primarias, foraneas y
+     restricciones.
   2. Existe una restriccion o validacion que impide reservas activas que se
      crucen en la misma cancha (RN-01).
   3. Hay indices en los campos de busqueda frecuente: fecha de reserva, cancha,
@@ -710,8 +715,8 @@ Prioridad: Alta | Estimacion: 5 pts | Sprint: 1
 Criterios de aceptacion:
   1. Los endpoints siguen convenciones REST (GET, POST, PUT, DELETE) y
      responden en JSON.
-  2. La API esta documentada con Swagger / OpenAPI y se puede probar desde el
-     navegador.
+  2. La API esta documentada con Swagger / OpenAPI (backend/openapi.yaml) y se
+     puede probar desde el navegador.
   3. Los errores devuelven codigos HTTP correctos (400, 401, 403, 404, 409,
      500) con un mensaje claro.
 
