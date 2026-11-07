@@ -419,41 +419,79 @@ CanchaYa/
  
 ## 7. Instalación y ejecución
 
-> El repositorio es hoy un **esqueleto**: los comandos de abajo ya están configurados, pero la aplicación no hace nada hasta que se implementen los archivos vacíos (ver [`docs/estructura.md`](docs/estructura.md)).
+### Estado del desarrollo
+
+| Sprint | Alcance | Estado |
+|---|---|---|
+| 1 | Usuarios (HU-01 a HU-04), complejos, canchas, horarios, tarifas y bloqueos (HU-05 a HU-09), HT-01 a HT-04, HT-10 | Terminado |
+| 2 | Reservas y pagos básicos | Pendiente |
+| 3 | Equipos y Busca Partido | Pendiente |
+| 4 | Pagos divididos, reembolsos, notificaciones y reputación | Pendiente |
+| 5 | Reserva recurrente, chat, reportes y administración | Pendiente |
 
 ### Con Docker
 
 ```bash
 git clone https://github.com/<usuario>/<repositorio>.git
 cd <repositorio>
-cp .env.example .env            # y cambia JWT_SECRET por un valor propio
-docker-compose up
+cp .env.example .env            # y cambia JWT_SECRET por un valor propio (mínimo 32 caracteres)
+docker-compose up               # aplica las migraciones al arrancar
+docker-compose exec backend npm run seed   # opcional: datos de prueba
 ```
 
 - Frontend: http://localhost:5173
 - API: http://localhost:3000/api/health
+- Documentación de la API (Swagger UI, se puede probar desde el navegador): http://localhost:3000/api/docs
 
 ### Sin Docker
 
-Requiere Node.js 20 o superior y PostgreSQL 16.
+Requiere Node.js 20.12 o superior y PostgreSQL 16 (con la extensión `btree_gist`, incluida en la distribución oficial).
 
 ```bash
+cp .env.example .env            # en DATABASE_URL usa localhost en lugar de db
 cd backend && npm install
 npm run migrate                 # aplica database/migrations
+npm run seed                    # opcional: datos de prueba (solo desarrollo)
 npm run dev                     # API en http://localhost:3000
 
 cd ../frontend && npm install
 npm run dev                     # web en http://localhost:5173
 ```
 
+Sin `SMTP_HOST`, en desarrollo los correos (verificación de cuenta y recuperación de contraseña) se escriben en el log del backend con su enlace.
+
+### Cuentas de prueba (seed)
+
+Todas usan la contraseña `CanchaYa2026`. Solo existen si se ejecuta `npm run seed`.
+
+| Rol | Correo |
+|---|---|
+| Superadministrador | `superadmin@canchaya.local` |
+| Administrador de complejo | `admin.norte@canchaya.local`, `admin.sur@canchaya.local` |
+| Jugador | `jugador1@canchaya.local` a `jugador4@canchaya.local` |
+
 ### Verificaciones (las mismas que corre el CI)
+
+Las pruebas de integración necesitan una base PostgreSQL llamada `canchaya_test`: la suite la vacía y aplica las migraciones al empezar (por seguridad se niega a correr sobre una base cuyo nombre no termine en `_test`).
 
 ```bash
 cd backend
 npm test                        # unitarias y de integración
 npm run typecheck               # tipos de TypeScript
 npm run check:boundaries        # reglas de arquitectura entre módulos
+npm run build                   # compila a dist/ (producción: npm start)
 cd ../frontend && npm run build # tipos y compilación
 ```
+
+### Cambios respecto al modelo E-R
+
+Durante el Sprint 1 se agregaron estos campos de soporte (no cambian entidades ni relaciones):
+
+| Tabla | Campo | Para qué |
+|---|---|---|
+| Usuario | `credenciales_desde` | Al cambiar o restablecer la contraseña, los JWT emitidos antes dejan de valer. |
+| TokenUsuario | `fecha_creacion` | Auditoría de los enlaces enviados. |
+| Reserva | `motivo_cancelacion` | HU-28.3: notificar el motivo cuando el complejo cancela o mueve una reserva. |
+| PartidoAbierto | `fecha_rival_confirmado`, `alerta_sin_rival_enviada` | HU-26.2 (plazo de 2 h para el abono del rival) y HU-22.3 (alerta única de 6 h). |
 
 ---
