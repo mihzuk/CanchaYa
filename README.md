@@ -74,12 +74,6 @@ Resuelve el problema principal del proyecto y funciona en dos modalidades:
 
 **Arquitectura:** monolito modular por capas (un módulo por épica). El detalle y el porqué de cada decisión están en [`docs/arquitectura.md`](docs/arquitectura.md).
 
----|---|
-| Frontend | React |
-| Backend | Node.js con Express (o Java con Spring Boot) |
-| Base de datos | PostgreSQL o MySQL |
-| Despliegue | Docker y GitHub Actions |
- 
 ---
  
 ## 2. Requerimientos funcionales (Historias de usuario - Épicas)
