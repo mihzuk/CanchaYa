@@ -4,12 +4,18 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-    // Mientras no haya pruebas escritas, la suite no debe fallar.
-    passWithNoTests: true,
     // Las pruebas de integración comparten una base de datos: se ejecutan una por una.
     fileParallelism: false,
-    // Cuando exista tests/helpers/globalSetup.ts, activar:
-    // globalSetup: ['./tests/helpers/globalSetup.ts'],
+    // Recrea la base *_test y aplica las migraciones antes de la suite.
+    globalSetup: ['./tests/helpers/globalSetup.ts'],
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      exclude: ['src/main.ts', 'src/**/__tests__/**'],
+      reporter: ['text-summary', 'html'],
+    },
     env: {
       NODE_ENV: 'test',
       JWT_SECRET: 'secreto-solo-para-pruebas-de-integracion-0123456789',

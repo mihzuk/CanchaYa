@@ -43,6 +43,8 @@ jobs:
         run: npm run check:boundaries
       - name: Pruebas
         run: npm test
+      - name: Compilación de producción
+        run: npm run build
 
   frontend:
     runs-on: ubuntu-latest

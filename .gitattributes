@@ -1,0 +1,6 @@
+# Finales de línea LF en el repositorio para todo el equipo (Windows, macOS, Linux).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.docx binary
+*.drawio text eol=lf
