@@ -191,6 +191,39 @@ describe('HU-07 · horarios de atención', () => {
     await api().delete(`/api/complejos/${complejoId}/horarios-especiales/${martes}`).set(admin.auth).expect(204);
   });
 
+  it('una fecha especial puede marcarse como cerrada (p. ej. festivo) y avisa de reservas en ese día', async () => {
+    const { complejoId, canchaId } = await crearComplejoActivo(admin);
+    const martes = proximo(2);
+    const reserva = { id: 3, codigo: 'CY-CERRADO1', canchaId, fecha: martes, horaInicio: '15:00', horaFin: '16:00' };
+    registrarConsultaReservas(async () => [reserva]);
+    const r = await api()
+      .post(`/api/complejos/${complejoId}/horarios-especiales`)
+      .set(admin.auth)
+      .send({ fecha: martes, cerrado: true })
+      .expect(200);
+    expect(r.body.horarios.find((h: { fechaEspecial: string | null }) => h.fechaEspecial === martes)).toMatchObject({
+      cerrado: true,
+      horaApertura: null,
+      horaCierre: null,
+      duracionTurnoMin: null,
+    });
+    expect(r.body.advertencias.reservasFueraDeHorario).toEqual([reserva]);
+    const franjas = await api().get(`/api/canchas/${canchaId}/franjas?fecha=${martes}`).expect(200);
+    expect(franjas.body.franjas).toEqual([]);
+    // Volver a abrir ese día con otro horario reemplaza el cierre.
+    await api()
+      .post(`/api/complejos/${complejoId}/horarios-especiales`)
+      .set(admin.auth)
+      .send({ fecha: martes, cerrado: false, horaApertura: '09:00', horaCierre: '12:00', duracionTurnoMin: 60 })
+      .expect(200);
+    expect((await api().get(`/api/canchas/${canchaId}/franjas?fecha=${martes}`).expect(200)).body.franjas).toHaveLength(3);
+  });
+
+  it('400 si una fecha abierta no trae horas', async () => {
+    const { complejoId } = await crearComplejoActivo(admin);
+    await api().post(`/api/complejos/${complejoId}/horarios-especiales`).set(admin.auth).send({ fecha: proximo(3), cerrado: false }).expect(400);
+  });
+
   it('al cambiar el horario avisa de las reservas que quedan fuera y no las elimina', async () => {
     const { complejoId, canchaId } = await crearComplejoActivo(admin);
     const martes = proximo(2);

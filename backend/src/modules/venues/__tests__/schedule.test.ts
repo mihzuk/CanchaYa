@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { franjasDelDia, horarioParaFecha, quedaFueraDeHorario, validarHorario, type Horario } from '../domain/schedule';
 
 const semana = (apertura: string, cierre: string): Horario[] =>
-  [1, 2, 3, 4, 5].map((d) => ({ diaSemana: d, fechaEspecial: null, horaApertura: apertura, horaCierre: cierre, duracionTurnoMin: 60 }));
+  [1, 2, 3, 4, 5].map((d) => ({ diaSemana: d, fechaEspecial: null, cerrado: false, horaApertura: apertura, horaCierre: cierre, duracionTurnoMin: 60 }));
 
 describe('horarioParaFecha (HU-07 criterio 2)', () => {
   const horarios: Horario[] = [
     ...semana('08:00', '23:00'),
     // Lunes festivo 2026-11-02 (Todos los Santos trasladado): horario especial.
-    { diaSemana: null, fechaEspecial: '2026-11-02', horaApertura: '10:00', horaCierre: '18:00', duracionTurnoMin: 60 },
+    { diaSemana: null, fechaEspecial: '2026-11-02', cerrado: false, horaApertura: '10:00', horaCierre: '18:00', duracionTurnoMin: 60 },
   ];
 
   it('usa el horario habitual del día de la semana', () => {
@@ -19,6 +19,16 @@ describe('horarioParaFecha (HU-07 criterio 2)', () => {
     expect(horarioParaFecha('2026-11-02', horarios)).toMatchObject({ horaApertura: '10:00', horaCierre: '18:00' });
     expect(franjasDelDia('2026-11-02', horarios)).toHaveLength(8);
     expect(franjasDelDia('2026-11-03', horarios)).toHaveLength(15);
+  });
+
+  it('una fecha especial cerrada no tiene franjas aunque el día habitual abra', () => {
+    const conCierre: Horario[] = [
+      ...horarios,
+      { diaSemana: null, fechaEspecial: '2026-12-08', cerrado: true, horaApertura: null, horaCierre: null, duracionTurnoMin: null },
+    ];
+    expect(franjasDelDia('2026-12-08', conCierre)).toEqual([]); // martes festivo cerrado
+    expect(franjasDelDia('2026-12-15', conCierre)).toHaveLength(15); // el martes siguiente abre normal
+    expect(quedaFueraDeHorario({ fecha: '2026-12-08', horaInicio: '10:00', horaFin: '11:00' }, conCierre)).toBe(true);
   });
 
   it('devuelve null y sin franjas si el complejo no abre ese día', () => {

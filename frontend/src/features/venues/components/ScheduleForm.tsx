@@ -27,7 +27,7 @@ function filasIniciales(horarios: Horario[]): FilaDia[] {
   return DIAS_SEMANA.map((_, i) => {
     const h = horarios.find((x) => x.diaSemana === i + 1);
     return h
-      ? { abierto: true, apertura: formatHora(h.horaApertura), cierre: formatHora(h.horaCierre), duracion: String(h.duracionTurnoMin) }
+      ? { abierto: true, apertura: formatHora(h.horaApertura ?? '08:00'), cierre: formatHora(h.horaCierre ?? '22:00'), duracion: String(h.duracionTurnoMin ?? 60) }
       : { abierto: false, apertura: '08:00', cierre: '22:00', duracion: '60' };
   });
 }
@@ -138,6 +138,7 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
   const [apertura, setApertura] = useState('08:00');
   const [cierre, setCierre] = useState('22:00');
   const [duracion, setDuracion] = useState('60');
+  const [cerrado, setCerrado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const especiales = horarios
     .filter((h) => h.fechaEspecial !== null)
@@ -145,10 +146,16 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
 
   const agregar = useMutation({
     mutationFn: () =>
-      guardarHorarioEspecial(complejoId, { fecha, horaApertura: apertura, horaCierre: cierre, duracionTurnoMin: Number(duracion) }),
+      guardarHorarioEspecial(
+        complejoId,
+        cerrado
+          ? { fecha, cerrado: true }
+          : { fecha, cerrado: false, horaApertura: apertura, horaCierre: cierre, duracionTurnoMin: Number(duracion) },
+      ),
     onSuccess: (r) => {
       mostrar('Fecha especial guardada.', 'success');
       setFecha('');
+      setCerrado(false);
       onResultado(r);
       void qc.invalidateQueries({ queryKey: ['complejo', complejoId] });
     },
@@ -171,7 +178,7 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
       setError('Elige la fecha especial.');
       return;
     }
-    const msg = validarTurno(apertura, cierre, duracion);
+    const msg = cerrado ? null : validarTurno(apertura, cierre, duracion);
     if (msg) {
       setError(msg);
       return;
@@ -182,7 +189,7 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
   return (
     <Card>
       <h2>Fechas especiales</h2>
-      <p className="muted">Úsalas para festivos o eventos: reemplazan el horario semanal en esa fecha.</p>
+      <p className="muted">Úsalas para festivos o eventos: reemplazan el horario semanal en esa fecha, con otro horario o cerrando todo el día.</p>
       {especiales.length === 0 ? (
         <p>No hay fechas especiales registradas.</p>
       ) : (
@@ -190,8 +197,14 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
           {especiales.map((h) => (
             <li key={h.id}>
               <span>
-                <strong>{formatFecha(h.fechaEspecial ?? '')}</strong>: {formatHora(h.horaApertura)} - {formatHora(h.horaCierre)} · turnos de{' '}
-                {h.duracionTurnoMin} min
+                <strong>{formatFecha(h.fechaEspecial ?? '')}</strong>:{' '}
+                {h.cerrado ? (
+                  'Cerrado todo el día'
+                ) : (
+                  <>
+                    {formatHora(h.horaApertura ?? '')} - {formatHora(h.horaCierre ?? '')} · turnos de {h.duracionTurnoMin} min
+                  </>
+                )}
               </span>
               <Button
                 variant="ghost"
@@ -209,12 +222,22 @@ function FechasEspeciales({ complejoId, horarios, onResultado }: SubFormProps) {
         {error && <Alert tone="error">{error}</Alert>}
         <div className="form__row">
           <Input label="Fecha" type="date" min={hoyBogota()} value={fecha} onChange={(e) => setFecha(e.target.value)} />
-          <Input label="Duración del turno (min)" type="number" inputMode="numeric" min={30} max={180} step={15} value={duracion} onChange={(e) => setDuracion(e.target.value)} />
+          {!cerrado && (
+            <Input label="Duración del turno (min)" type="number" inputMode="numeric" min={30} max={180} step={15} value={duracion} onChange={(e) => setDuracion(e.target.value)} />
+          )}
         </div>
-        <div className="form__row">
-          <Select label="Apertura" value={apertura} onChange={(e) => setApertura(e.target.value)} options={opcionesHora(false, apertura)} />
-          <Select label="Cierre" value={cierre} onChange={(e) => setCierre(e.target.value)} options={opcionesHora(true, cierre)} />
+        <div className="check">
+          <label className="check__label">
+            <input type="checkbox" checked={cerrado} onChange={(e) => setCerrado(e.target.checked)} />
+            <span>Cerrado todo el día</span>
+          </label>
         </div>
+        {!cerrado && (
+          <div className="form__row">
+            <Select label="Apertura" value={apertura} onChange={(e) => setApertura(e.target.value)} options={opcionesHora(false, apertura)} />
+            <Select label="Cierre" value={cierre} onChange={(e) => setCierre(e.target.value)} options={opcionesHora(true, cierre)} />
+          </div>
+        )}
         <Button type="submit" loading={agregar.isPending}>
           Agregar fecha especial
         </Button>

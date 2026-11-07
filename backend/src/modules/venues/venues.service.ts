@@ -19,6 +19,7 @@ import type {
   FotoDto,
   FranjaDto,
   HorarioDto,
+  HorarioEspecialInput,
   ReservaActivaDto,
   TarifaDto,
   TarifaInput,
@@ -259,12 +260,8 @@ export const venuesService = {
   },
 
   /** HU-07 criterio 2: la fecha especial reemplaza al horario habitual solo ese día. */
-  async guardarHorarioEspecial(
-    complejoId: number,
-    usuario: UsuarioSesion,
-    d: { fecha: string; horaApertura: string; horaCierre: string; duracionTurnoMin: number },
-  ) {
-    validarHorarios([{ ...d, campo: 'horaCierre' }]);
+  async guardarHorarioEspecial(complejoId: number, usuario: UsuarioSesion, d: HorarioEspecialInput) {
+    if (!d.cerrado) validarHorarios([{ ...d, campo: 'horaCierre' }]);
     if (d.fecha < hoyBogota()) throw AppError.validacion([{ campo: 'fecha', mensaje: 'La fecha no puede estar en el pasado' }]);
     await asegurarPropietario(complejoId, usuario);
     return withTransaction(async (db) => {
