@@ -485,7 +485,7 @@ cd ../frontend && npm run build # tipos y compilación
 
 ### Cambios respecto al modelo E-R
 
-Durante el Sprint 1 se agregaron estos campos de soporte (no cambian entidades ni relaciones):
+Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el diagrama los incluye:
 
 | Tabla | Campo | Para qué |
 |---|---|---|
@@ -493,5 +493,6 @@ Durante el Sprint 1 se agregaron estos campos de soporte (no cambian entidades n
 | TokenUsuario | `fecha_creacion` | Auditoría de los enlaces enviados. |
 | Reserva | `motivo_cancelacion` | HU-28.3: notificar el motivo cuando el complejo cancela o mueve una reserva. |
 | PartidoAbierto | `fecha_rival_confirmado`, `alerta_sin_rival_enviada` | HU-26.2 (plazo de 2 h para el abono del rival) y HU-22.3 (alerta única de 6 h). |
+| HorarioAtencion | `cerrado` (y horas opcionales) | HU-07.2: una fecha especial puede cerrar el complejo todo el día (migración `010`). |
 
 ---

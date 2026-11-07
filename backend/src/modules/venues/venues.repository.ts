@@ -11,6 +11,7 @@ import type {
   FiltrosComplejos,
   FotoDto,
   HorarioDto,
+  HorarioEspecialInput,
   ServicioDto,
   TarifaDto,
   TarifaInput,
@@ -59,10 +60,14 @@ const aCancha = (c: CanchaFila): CanchaDto => ({
   estado: c.estado,
 });
 
-const SELECT_HORARIO = `SELECT id, dia_semana AS "diaSemana", fecha_especial AS "fechaEspecial", hora_apertura AS "horaApertura",
+const SELECT_HORARIO = `SELECT id, dia_semana AS "diaSemana", fecha_especial AS "fechaEspecial", cerrado, hora_apertura AS "horaApertura",
                                hora_cierre AS "horaCierre", duracion_turno_min AS "duracionTurnoMin"
                           FROM horario_atencion`;
-const aHorario = (h: HorarioDto): HorarioDto => ({ ...h, horaApertura: normalizarHora(h.horaApertura), horaCierre: normalizarHora(h.horaCierre) });
+const aHorario = (h: HorarioDto): HorarioDto => ({
+  ...h,
+  horaApertura: h.horaApertura === null ? null : normalizarHora(h.horaApertura),
+  horaCierre: h.horaCierre === null ? null : normalizarHora(h.horaCierre),
+});
 
 const SELECT_TARIFA = `SELECT id, cancha_id AS "canchaId", tipo_dia AS "tipoDia", hora_inicio AS "horaInicio", hora_fin AS "horaFin",
                               precio, activa FROM tarifa`;
@@ -330,18 +335,15 @@ export const venuesRepository = {
     }
   },
 
-  async guardarHorarioEspecial(
-    complejoId: number,
-    d: { fecha: string; horaApertura: string; horaCierre: string; duracionTurnoMin: number },
-    db: Queryable,
-  ): Promise<void> {
+  async guardarHorarioEspecial(complejoId: number, d: HorarioEspecialInput, db: Queryable): Promise<void> {
+    const abierto = d.cerrado ? null : d;
     await query(
-      `INSERT INTO horario_atencion (complejo_id, fecha_especial, hora_apertura, hora_cierre, duracion_turno_min)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO horario_atencion (complejo_id, fecha_especial, cerrado, hora_apertura, hora_cierre, duracion_turno_min)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (complejo_id, fecha_especial) WHERE fecha_especial IS NOT NULL
-       DO UPDATE SET hora_apertura = EXCLUDED.hora_apertura, hora_cierre = EXCLUDED.hora_cierre,
+       DO UPDATE SET cerrado = EXCLUDED.cerrado, hora_apertura = EXCLUDED.hora_apertura, hora_cierre = EXCLUDED.hora_cierre,
                      duracion_turno_min = EXCLUDED.duracion_turno_min`,
-      [complejoId, d.fecha, d.horaApertura, d.horaCierre, d.duracionTurnoMin],
+      [complejoId, d.fecha, d.cerrado, abierto?.horaApertura ?? null, abierto?.horaCierre ?? null, abierto?.duracionTurnoMin ?? null],
       db,
     );
   },

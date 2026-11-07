@@ -44,7 +44,7 @@ function HorarioSemanal({ horarios }: { horarios: Horario[] }) {
           return (
             <div key={dia}>
               <dt>{dia}</dt>
-              <dd>{h ? `${formatHora(h.horaApertura)} - ${formatHora(h.horaCierre)}` : 'Cerrado'}</dd>
+              <dd>{h && !h.cerrado && h.horaApertura && h.horaCierre ? `${formatHora(h.horaApertura)} - ${formatHora(h.horaCierre)}` : 'Cerrado'}</dd>
             </div>
           );
         })}

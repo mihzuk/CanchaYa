@@ -85,12 +85,23 @@ export const horarioHabitualSchema = z.object({
     .refine((d) => new Set(d.map((x) => x.diaSemana)).size === d.length, 'Cada día de la semana puede aparecer una sola vez'),
 });
 
-export const horarioEspecialSchema = z.object({
-  fecha: zFecha,
-  horaApertura: zHora,
-  horaCierre: zHora,
-  duracionTurnoMin: zDuracion,
-});
+/** Fecha especial: otro horario ese día, o `cerrado: true` (sin horas) para no abrir. */
+const horarioEspecialBase = z.discriminatedUnion('cerrado', [
+  z.object({ fecha: zFecha, cerrado: z.literal(true) }),
+  z.object({
+    fecha: zFecha,
+    cerrado: z.literal(false),
+    horaApertura: zHora,
+    horaCierre: zHora,
+    duracionTurnoMin: zDuracion,
+  }),
+]);
+// Si no se envía `cerrado`, es un horario especial abierto.
+export const horarioEspecialSchema = z.preprocess(
+  (v) => (v && typeof v === 'object' && !('cerrado' in v) ? { ...v, cerrado: false } : v),
+  horarioEspecialBase,
+);
+export type HorarioEspecialInput = z.infer<typeof horarioEspecialBase>;
 
 export const fechaParamSchema = z.object({ id: zId, fecha: zFecha });
 
@@ -194,9 +205,11 @@ export interface HorarioDto {
   id: number;
   diaSemana: number | null;
   fechaEspecial: string | null;
-  horaApertura: string;
-  horaCierre: string;
-  duracionTurnoMin: number;
+  /** Solo en fechas especiales: el complejo no abre ese día (sin horas ni turnos). */
+  cerrado: boolean;
+  horaApertura: string | null;
+  horaCierre: string | null;
+  duracionTurnoMin: number | null;
 }
 
 export interface TarifaDto {

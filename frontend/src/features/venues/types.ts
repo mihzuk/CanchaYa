@@ -57,9 +57,11 @@ export interface Horario {
   id: number;
   diaSemana: number | null;
   fechaEspecial: string | null;
-  horaApertura: string;
-  horaCierre: string;
-  duracionTurnoMin: number;
+  /** Solo en fechas especiales: el complejo no abre ese día (sin horas). */
+  cerrado: boolean;
+  horaApertura: string | null;
+  horaCierre: string | null;
+  duracionTurnoMin: number | null;
 }
 export type TipoDia = 'semana' | 'fin_semana_festivo';
 export interface Tarifa {
@@ -132,12 +134,9 @@ export interface DiaHorario {
   horaCierre: string;
   duracionTurnoMin: number;
 }
-export interface HorarioEspecialInput {
-  fecha: string;
-  horaApertura: string;
-  horaCierre: string;
-  duracionTurnoMin: number;
-}
+export type HorarioEspecialInput =
+  | { fecha: string; cerrado: true }
+  | { fecha: string; cerrado: false; horaApertura: string; horaCierre: string; duracionTurnoMin: number };
 export interface ResultadoHorarios {
   horarios: Horario[];
   advertencias: { reservasFueraDeHorario: ReservaActiva[] };
