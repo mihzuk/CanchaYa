@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-COPY tsconfig.json ./
+COPY tsconfig.json openapi.yaml ./
 COPY src ./src
 
 EXPOSE 3000
