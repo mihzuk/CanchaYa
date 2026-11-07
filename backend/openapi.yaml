@@ -2,27 +2,2303 @@ openapi: 3.0.3
 info:
   title: CanchaYa API
   version: 0.1.0
+  license:
+    name: MIT
   description: |
     API REST de CanchaYa. Se documenta aquí cada endpoint a medida que se implementa (HT-03, DoD de cada historia).
 
     Autenticación: `Authorization: Bearer <token>` (JWT de 2 horas).
     Errores: `{ "error": { "codigo", "mensaje", "detalles?" } }` con códigos HTTP 400, 401, 403, 404, 409 y 500.
+
+    Convenciones generales:
+    - Fechas de calendario `YYYY-MM-DD`; horas `HH:MM` (24 h, zona America/Bogota). Como entrada también se acepta `HH:MM:SS`, y `24:00` representa la medianoche de cierre.
+    - Dinero: enteros en pesos colombianos (COP), sin decimales.
+    - Los identificadores son enteros positivos.
+    - Un JSON mal formado responde 400 `JSON_INVALIDO`; un cuerpo mayor de 100 kb responde 413 `CUERPO_DEMASIADO_GRANDE`; una ruta inexistente responde 404 `RUTA_NO_ENCONTRADA`.
+    - Los endpoints con límite de peticiones (HT-13) responden 429 `DEMASIADAS_PETICIONES` e incluyen las cabeceras `RateLimit-Limit`, `RateLimit-Remaining` y `Retry-After`.
 servers:
   - url: http://localhost:3000/api
 tags:
   - name: Auth            # EP-01
+    description: Registro, sesión, recuperación de contraseña y perfil (EP-01, HU-01 a HU-04).
   - name: Complejos       # EP-02
+    description: Complejos, canchas, horarios, tarifas y bloqueos (EP-02, HU-05 a HU-09).
   - name: Reservas        # EP-03
+    description: Pendiente (EP-03).
   - name: Pagos           # EP-04
+    description: Pendiente.
+
   - name: Equipos         # EP-05
+    description: Pendiente.
+
   - name: Busca Partido   # EP-06
+    description: Pendiente.
+
   - name: Notificaciones  # EP-07
+    description: Pendiente.
+
   - name: Calificaciones  # EP-08
+    description: Pendiente.
+
   - name: Administración  # EP-09
-paths: {}
+    description: Pendiente.
+
+  - name: Sistema
+    description: Estado del servicio.
+paths:
+  /health:
+    get:
+      operationId: estadoServicio
+      tags: [Sistema]
+      security: []
+      summary: Estado del servicio y de la base de datos
+      description: Comprueba que la API responde y que la base de datos acepta consultas. No requiere sesión.
+      responses:
+        '200':
+          description: Servicio y base de datos operativos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Salud'
+              example: { estado: ok, baseDeDatos: ok }
+        '503':
+          description: La base de datos no responde.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Salud'
+              example: { estado: degradado, baseDeDatos: sin conexión }
+
+  # ------------------------------------------------------------------ Auth (EP-01)
+  /auth/registro:
+    post:
+      operationId: registrarUsuario
+      tags: [Auth]
+      summary: Registrar una cuenta de jugador
+      description: |
+        HU-01. Crea la cuenta con rol `Jugador`, envía el correo de verificación (enlace válido 24 horas) e inicia sesión de inmediato.
+        El correo se normaliza a minúsculas. RNF-03: se exige aceptar el tratamiento de datos (Ley 1581 de 2012).
+        Límite: 20 peticiones por hora por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Registro'
+      responses:
+        '201':
+          description: Cuenta creada. Devuelve la sesión.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '409':
+          description: El correo (`CORREO_EN_USO`) o el nombre de usuario (`USERNAME_EN_USO`) ya existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CORREO_EN_USO, mensaje: El correo ya está en uso } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/login:
+    post:
+      operationId: iniciarSesion
+      tags: [Auth]
+      summary: Iniciar sesión
+      description: |
+        HU-02 / HT-04. Devuelve un JWT de 2 horas. Tras 5 intentos fallidos seguidos la cuenta se bloquea 15 minutos (403 `CUENTA_BLOQUEADA`).
+        No se revela si el correo existe (siempre 401 `CREDENCIALES_INVALIDAS`).
+        Límite: 10 peticiones por minuto por IP y correo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+      responses:
+        '200':
+          description: Sesión iniciada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          description: Correo o contraseña incorrectos (`CREDENCIALES_INVALIDAS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CREDENCIALES_INVALIDAS, mensaje: Correo o contraseña incorrectos } }
+        '403':
+          description: Cuenta bloqueada por intentos fallidos (`CUENTA_BLOQUEADA`) o suspendida/desactivada (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CUENTA_BLOQUEADA, mensaje: Tu cuenta está bloqueada por intentos fallidos. Intenta de nuevo en 15 minutos. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/logout:
+    post:
+      operationId: cerrarSesion
+      tags: [Auth]
+      summary: Cerrar sesión
+      description: |
+        HU-02. El JWT no tiene estado en el servidor: cerrar sesión consiste en descartar el token en el cliente.
+        No exige token y siempre responde 204.
+      security: []
+      responses:
+        '204':
+          description: Sesión cerrada (sin contenido).
+
+  /auth/verificar-correo:
+    post:
+      operationId: verificarCorreo
+      tags: [Auth]
+      summary: Confirmar el correo con el enlace recibido
+      description: |
+        HU-01 (criterio 4). Consume el token de verificación enviado por correo (válido 24 horas, de un solo uso).
+        Límite: 10 peticiones por minuto por IP y correo del cuerpo (el cuerpo no lleva correo, así que aplica por IP).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenEnlace'
+      responses:
+        '204':
+          description: Correo verificado.
+        '400':
+          description: Datos inválidos (`VALIDACION`), enlace expirado (`TOKEN_EXPIRADO`) o enlace inválido o ya usado (`TOKEN_INVALIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_EXPIRADO, mensaje: El enlace expiró. Solicita uno nuevo. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/reenviar-verificacion:
+    post:
+      operationId: reenviarVerificacion
+      tags: [Auth]
+      summary: Reenviar el correo de verificación
+      description: |
+        HU-01. Requiere sesión (cualquier rol). Si el correo ya está verificado no hace nada. Sin cuerpo.
+        Límite: 5 peticiones cada 15 minutos por IP.
+      security:
+        - bearer: []
+      responses:
+        '204':
+          description: Solicitud aceptada (sin contenido).
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/recuperar-contrasena:
+    post:
+      operationId: recuperarContrasena
+      tags: [Auth]
+      summary: Solicitar enlace de recuperación de contraseña
+      description: |
+        HU-03 (criterio 1). Envía un enlace válido 30 minutos si el correo existe y la cuenta está activa.
+        La respuesta es siempre la misma para no revelar si el correo está registrado.
+        Límite: 5 peticiones cada 15 minutos por IP y correo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecuperarContrasena'
+      responses:
+        '202':
+          description: Solicitud aceptada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+              example:
+                mensaje: Si el correo está registrado, te enviamos un enlace para restablecer la contraseña. Revisa tu bandeja de entrada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/restablecer-contrasena:
+    post:
+      operationId: restablecerContrasena
+      tags: [Auth]
+      summary: Restablecer la contraseña con el enlace recibido
+      description: |
+        HU-03 (criterio 2). Un enlace vencido (30 minutos) o ya usado se rechaza y se debe solicitar uno nuevo.
+        Límite: 10 peticiones por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestablecerContrasena'
+      responses:
+        '204':
+          description: Contraseña actualizada.
+        '400':
+          description: Datos inválidos (`VALIDACION`), enlace expirado (`TOKEN_EXPIRADO`) o inválido/ya usado (`TOKEN_INVALIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_INVALIDO, mensaje: El enlace no es válido o ya fue usado. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/yo:
+    get:
+      operationId: obtenerMiPerfil
+      tags: [Auth]
+      summary: Obtener mi perfil
+      description: HU-04. Devuelve los datos completos de la cuenta autenticada (cualquier rol).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Perfil del usuario autenticado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usuario]
+                properties:
+                  usuario:
+                    $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: actualizarMiPerfil
+      tags: [Auth]
+      summary: Actualizar mi perfil
+      description: |
+        HU-04. Reemplaza los datos editables del perfil (cualquier rol). `fotoUrl`, `posicionPreferida` y `nivel` son obligatorios en el cuerpo pero admiten `null`.
+        El correo, el nombre de usuario y la fecha de nacimiento no se pueden cambiar.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Perfil'
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usuario]
+                properties:
+                  usuario:
+                    $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/yo/contrasena:
+    put:
+      operationId: cambiarContrasena
+      tags: [Auth]
+      summary: Cambiar mi contraseña
+      description: |
+        HU-03 / HU-04. Requiere la contraseña actual. Cualquier rol. Límite: 10 peticiones por minuto por IP.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioContrasena'
+      responses:
+        '204':
+          description: Contraseña cambiada.
+        '400':
+          description: Datos inválidos (`VALIDACION`) o contraseña actual incorrecta (`CONTRASENA_ACTUAL_INCORRECTA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CONTRASENA_ACTUAL_INCORRECTA, mensaje: La contraseña actual no es correcta } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /usuarios/{username}:
+    get:
+      operationId: obtenerPerfilPublico
+      tags: [Auth]
+      summary: Ver el perfil público de un jugador
+      description: |
+        HU-04 (criterio 2). Público, sin sesión. Nunca expone correo ni celular.
+        Un usuario desactivado responde 404. `partidosJugados`, `fairPlay` y `equipos` los completan otros módulos (por ahora 0, null y []).
+        Un `username` con formato inválido responde 400 `VALIDACION`.
+      security: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          description: Nombre de usuario (3 a 30 caracteres).
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 30
+            pattern: '^[a-zA-Z0-9_.]+$'
+          example: juan.perez
+      responses:
+        '200':
+          description: Perfil público.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [perfil]
+                properties:
+                  perfil:
+                    $ref: '#/components/schemas/PerfilPublico'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          description: El jugador no existe (`USUARIO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: USUARIO_NO_ENCONTRADO, mensaje: El jugador no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  # ------------------------------------------------------------------ Complejos (EP-02)
+  /servicios:
+    get:
+      operationId: listarServicios
+      tags: [Complejos]
+      summary: Catálogo de servicios de un complejo
+      description: HU-05. Lista los servicios que un complejo puede ofrecer (parqueadero, cafetería, etc.). Público.
+      security: []
+      responses:
+        '200':
+          description: Catálogo de servicios.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servicios]
+                properties:
+                  servicios:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Servicio'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos:
+    get:
+      operationId: buscarComplejos
+      tags: [Complejos]
+      summary: Buscar complejos activos
+      description: |
+        HU-05 (criterio 2) / HU-06. Público. Solo devuelve complejos en estado `activo`, ordenados por nombre.
+        `q` busca por nombre o barrio (sin distinguir mayúsculas); `ciudad` es una coincidencia exacta sin distinguir mayúsculas.
+      security: []
+      parameters:
+        - name: ciudad
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+          example: Bogotá
+        - name: q
+          in: query
+          description: Texto a buscar en nombre o barrio.
+          schema:
+            type: string
+            maxLength: 80
+        - name: tipoFutbol
+          in: query
+          description: Solo complejos con al menos una cancha activa de este tipo.
+          schema:
+            $ref: '#/components/schemas/TipoFutbol'
+        - name: servicio
+          in: query
+          description: Id de un servicio que el complejo debe ofrecer.
+          schema:
+            type: integer
+            minimum: 1
+        - name: pagina
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: tamano
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+      responses:
+        '200':
+          description: Página de resultados.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [complejos, total, pagina, tamano]
+                properties:
+                  complejos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComplejoResumen'
+                  total:
+                    type: integer
+                    description: Total de complejos que cumplen los filtros.
+                  pagina:
+                    type: integer
+                  tamano:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearComplejo
+      tags: [Complejos]
+      summary: Registrar un complejo
+      description: |
+        HU-05 (criterio 1). Cualquier usuario autenticado puede registrar un complejo; el solicitante pasa a rol `AdminComplejo`.
+        El complejo queda en estado `pendiente` hasta que un Superadmin lo apruebe. Genera el evento `ComplejoRegistrado`.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplejoInput'
+      responses:
+        '201':
+          description: Complejo creado (estado `pendiente`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /mis-complejos:
+    get:
+      operationId: listarMisComplejos
+      tags: [Complejos]
+      summary: Listar mis complejos
+      description: |
+        HU-05. Roles: `AdminComplejo` o `Superadmin`. Devuelve los complejos administrados por el usuario en cualquier estado
+        (máximo 50, sin paginación).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Complejos del administrador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejosResumenLista'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/pendientes:
+    get:
+      operationId: listarComplejosPendientes
+      tags: [Complejos]
+      summary: Listar complejos pendientes de aprobación
+      description: |
+        HU-05 / HU-33. Rol: `Superadmin`. Complejos en estado `pendiente` (máximo 50, sin paginación).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Complejos pendientes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejosResumenLista'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: obtenerComplejo
+      tags: [Complejos]
+      summary: Detalle de un complejo
+      description: |
+        HU-05 / HU-06 / HU-07. Público (la sesión es opcional). Incluye canchas, horarios y servicios.
+        Un complejo que no está `activo` solo lo ve su administrador o un Superadmin; para el resto responde 404.
+        El público solo ve canchas activas y fechas especiales vigentes (hoy o futuras); `esGestor` indica si quien consulta es el dueño o Superadmin.
+        Un token inválido o vencido se trata como visitante (no responde 401).
+      security:
+        - {}
+        - bearer: []
+      responses:
+        '200':
+          description: Detalle del complejo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoDetalle'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: actualizarComplejo
+      tags: [Complejos]
+      summary: Actualizar un complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (solo el dueño del complejo) o `Superadmin`. Reemplaza todos los datos y los servicios (`servicioIds`).
+        Un complejo `rechazado` que se corrige vuelve a `pendiente`.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplejoInput'
+      responses:
+        '200':
+          description: Complejo actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/servicios:
+    put:
+      operationId: reemplazarServiciosComplejo
+      tags: [Complejos]
+      summary: Reemplazar los servicios de un complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`. Sustituye la lista completa de servicios.
+        Un id de servicio inexistente responde 400 `VALIDACION` (campo `servicioIds`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiciosInput'
+      responses:
+        '200':
+          description: Complejo con sus servicios actualizados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/fotos:
+    post:
+      operationId: agregarFotoComplejo
+      tags: [Complejos]
+      summary: Agregar una foto al complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`. La URL debe ser https. Máximo 10 fotos por complejo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FotoInput'
+      responses:
+        '201':
+          description: Foto agregada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [foto]
+                properties:
+                  foto:
+                    $ref: '#/components/schemas/Foto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          description: Se alcanzó el máximo de 10 fotos (`MAXIMO_FOTOS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MAXIMO_FOTOS, mensaje: Un complejo puede tener máximo 10 fotos } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/fotos/{fotoId}:
+    delete:
+      operationId: eliminarFotoComplejo
+      tags: [Complejos]
+      summary: Eliminar una foto del complejo
+      description: 'HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fotoId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: Foto eliminada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El complejo (`COMPLEJO_NO_ENCONTRADO`) o la foto (`FOTO_NO_ENCONTRADA`) no existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FOTO_NO_ENCONTRADA, mensaje: La foto no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/aprobacion:
+    patch:
+      operationId: resolverAprobacionComplejo
+      tags: [Complejos]
+      summary: Aprobar o rechazar un complejo
+      description: |
+        HU-33 (criterio 1) / HU-05 (criterio 2). Rol: `Superadmin`. Solo aplica a complejos `pendiente`.
+        Para rechazar (`aprobar: false`) el `motivo` es obligatorio. Genera los eventos `ComplejoAprobado` o `ComplejoRechazado`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Aprobacion'
+            examples:
+              aprobar:
+                value: { aprobar: true }
+              rechazar:
+                value: { aprobar: false, motivo: Faltan fotos de las canchas }
+      responses:
+        '200':
+          description: Complejo con su nuevo estado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          description: El complejo ya fue aprobado o rechazado (`COMPLEJO_YA_RESUELTO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: COMPLEJO_YA_RESUELTO, mensaje: El complejo ya fue aprobado o rechazado } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/canchas:
+    post:
+      operationId: crearCancha
+      tags: [Complejos]
+      summary: Crear una cancha en un complejo
+      description: |
+        HU-06. Roles: `AdminComplejo` (dueño) o `Superadmin`. Si no se envía `capacidadJugadores` se usa `tipoFutbol * 2`.
+        El nombre debe ser único dentro del complejo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaInput'
+      responses:
+        '201':
+          description: Cancha creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/CanchaDuplicada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}:
+    put:
+      operationId: actualizarCancha
+      tags: [Complejos]
+      summary: Actualizar una cancha
+      description: |
+        HU-06 (criterio 3). Roles: `AdminComplejo` (dueño del complejo de la cancha) o `Superadmin`.
+        Reemplaza todos los datos. Desactivar (`estado: inactiva`) conserva el historial: las canchas nunca se borran.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaInput'
+      responses:
+        '200':
+          description: Cancha actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/CanchaDuplicada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios:
+    get:
+      operationId: listarHorarios
+      tags: [Complejos]
+      summary: Listar los horarios de un complejo
+      description: |
+        HU-07. Roles: `AdminComplejo` (dueño) o `Superadmin`. Devuelve el horario habitual (por día de semana) y las fechas especiales.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Horarios del complejo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [horarios]
+                properties:
+                  horarios:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Horario'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: guardarHorarioHabitual
+      tags: [Complejos]
+      summary: Reemplazar el horario habitual
+      description: |
+        HU-07 (criterios 1 y 3). Roles: `AdminComplejo` (dueño) o `Superadmin`. Reemplaza el horario semanal; los días que no se envíen quedan cerrados.
+        Cada día puede aparecer una sola vez. La hora de cierre debe ser posterior a la de apertura y alcanzar al menos un turno completo.
+        Si quedan reservas activas fuera del nuevo horario no se eliminan: se devuelven en `advertencias.reservasFueraDeHorario`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HorarioHabitualInput'
+      responses:
+        '200':
+          description: Horarios guardados, con advertencias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HorariosGuardados'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios-especiales:
+    post:
+      operationId: guardarHorarioEspecial
+      tags: [Complejos]
+      summary: Definir un horario especial para una fecha
+      description: |
+        HU-07 (criterio 2). Roles: `AdminComplejo` (dueño) o `Superadmin`. El horario especial reemplaza al habitual solo ese día.
+        La fecha no puede estar en el pasado. Si ya existe uno para la fecha se reemplaza.
+        Devuelve advertencias si quedan reservas fuera del horario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HorarioEspecialInput'
+      responses:
+        '200':
+          description: Horarios guardados, con advertencias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HorariosGuardados'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios-especiales/{fecha}:
+    delete:
+      operationId: eliminarHorarioEspecial
+      tags: [Complejos]
+      summary: Eliminar el horario especial de una fecha
+      description: 'HU-07. Roles: `AdminComplejo` (dueño) o `Superadmin`. La fecha vuelve a regirse por el horario habitual.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-24'
+      responses:
+        '204':
+          description: Horario especial eliminado.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El complejo (`COMPLEJO_NO_ENCONTRADO`) no existe o no hay horario especial en esa fecha (`HORARIO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: HORARIO_NO_ENCONTRADO, mensaje: No hay un horario especial en esa fecha } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/tarifas:
+    get:
+      operationId: listarTarifas
+      tags: [Complejos]
+      summary: Listar las tarifas activas de una cancha
+      description: |
+        HU-08. Público (la sesión es opcional). Solo tarifas activas, ordenadas por tipo de día y hora de inicio.
+        Una cancha inactiva o de un complejo no activo solo la ve su administrador o un Superadmin; para el resto responde 404.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Tarifas de la cancha.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tarifas]
+                properties:
+                  tarifas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tarifa'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearTarifa
+      tags: [Complejos]
+      summary: Crear una tarifa para una cancha
+      description: |
+        HU-08. Roles: `AdminComplejo` (dueño) o `Superadmin`. `horaFin` debe ser posterior a `horaInicio`.
+        No puede cruzarse con otra tarifa activa del mismo tipo de día (409 `TARIFA_CRUZADA`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TarifaInput'
+      responses:
+        '201':
+          description: Tarifa creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TarifaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/TarifaCruzada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/franjas:
+    get:
+      operationId: listarFranjas
+      tags: [Complejos]
+      summary: Franjas horarias de una cancha en una fecha
+      description: |
+        HU-07 a HU-09. Público (la sesión es opcional). Calcula las franjas del día según el horario (especial o habitual), la tarifa vigente y los bloqueos.
+        Estados: `libre`, `bloqueada`, `pasada` (ya transcurrió, hora de Bogotá) o `sin_tarifa` (precio `null`).
+        Las reservas (HU-10) aún no se reflejan en el estado.
+        Una cancha inactiva o de un complejo no activo solo la ve su administrador o un Superadmin.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-05'
+      responses:
+        '200':
+          description: Cancha y franjas del día (vacías si el complejo no abre ese día).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FranjasDia'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /tarifas/{id}:
+    put:
+      operationId: actualizarTarifa
+      tags: [Complejos]
+      summary: Modificar una tarifa
+      description: |
+        HU-08 (criterio 3) / RN-04. Roles: `AdminComplejo` (dueño) o `Superadmin`.
+        No edita la tarifa: crea una nueva y desactiva la anterior (las reservas ya hechas conservan su precio). El `id` devuelto es el de la tarifa nueva.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TarifaInput'
+      responses:
+        '200':
+          description: Nueva tarifa vigente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TarifaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/TarifaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/TarifaCruzada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    delete:
+      operationId: eliminarTarifa
+      tags: [Complejos]
+      summary: Eliminar (desactivar) una tarifa
+      description: 'HU-08 / RN-04. Roles: `AdminComplejo` (dueño) o `Superadmin`. Es una baja lógica; las reservas existentes no cambian.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Tarifa desactivada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/TarifaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/bloqueos:
+    get:
+      operationId: listarBloqueos
+      tags: [Complejos]
+      summary: Listar los bloqueos de una cancha
+      description: |
+        HU-09. Roles: `AdminComplejo` (dueño) o `Superadmin`. Por defecto lista desde hoy hasta 60 días después; `desde` y `hasta` (inclusive) cambian el rango.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: desde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: hasta
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Bloqueos del rango.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bloqueos]
+                properties:
+                  bloqueos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Bloqueo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearBloqueo
+      tags: [Complejos]
+      summary: Bloquear una cancha por mantenimiento
+      description: |
+        HU-09. Roles: `AdminComplejo` (dueño) o `Superadmin`. Fecha y hora locales de Bogotá. `fechaFin` debe ser posterior a `fechaInicio` y no estar en el pasado.
+        HU-09 (criterio 2): si hay reservas activas en el rango no se bloquea y responde 409 `BLOQUEO_CON_RESERVAS` con las reservas en `datos.reservas`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BloqueoInput'
+      responses:
+        '201':
+          description: Bloqueo creado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bloqueo]
+                properties:
+                  bloqueo:
+                    $ref: '#/components/schemas/Bloqueo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          description: Hay reservas activas en el rango (`BLOQUEO_CON_RESERVAS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: BLOQUEO_CON_RESERVAS
+                  mensaje: Hay reservas en ese rango. Reprográmalas o cancélalas antes de bloquear.
+                  datos:
+                    reservas:
+                      - { id: 12, codigo: CY-000012, canchaId: 3, fecha: '2026-12-05', horaInicio: '18:00', horaFin: '19:00' }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /bloqueos/{id}:
+    delete:
+      operationId: eliminarBloqueo
+      tags: [Complejos]
+      summary: Eliminar un bloqueo
+      description: 'HU-09. Roles: `AdminComplejo` (dueño de la cancha) o `Superadmin`. Libera las franjas bloqueadas.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Bloqueo eliminado.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El bloqueo (`BLOQUEO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: BLOQUEO_NO_ENCONTRADO, mensaje: El bloqueo no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
 components:
   securitySchemes:
     bearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      description: Identificador numérico (entero positivo).
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+
+  responses:
+    Validacion:
+      description: Datos inválidos (`VALIDACION`). `detalles` indica el campo y el mensaje de cada error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              codigo: VALIDACION
+              mensaje: Revisa los datos ingresados.
+              detalles:
+                - { campo: correo, mensaje: Ingresa un correo válido }
+    NoAutenticado:
+      description: Falta el token (`NO_AUTENTICADO`) o es inválido o expiró (`TOKEN_INVALIDO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: NO_AUTENTICADO, mensaje: Debes iniciar sesión. } }
+    CuentaInactiva:
+      description: La cuenta está suspendida o desactivada (`CUENTA_INACTIVA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CUENTA_INACTIVA, mensaje: Tu cuenta está suspendida o desactivada. Contacta al soporte. } }
+    Prohibido:
+      description: |
+        Sin permiso (`PROHIBIDO`): el rol no es el requerido o el usuario no es el administrador del complejo.
+        También `CUENTA_INACTIVA` si la cuenta está suspendida o desactivada.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: PROHIBIDO, mensaje: No tienes permiso para realizar esta acción. } }
+    NoEncontrado:
+      description: El recurso no existe (404).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: USUARIO_NO_ENCONTRADO, mensaje: El usuario no existe } }
+    ComplejoNoEncontrado:
+      description: El complejo no existe o no es visible para el usuario (`COMPLEJO_NO_ENCONTRADO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: COMPLEJO_NO_ENCONTRADO, mensaje: El complejo no existe } }
+    CanchaNoEncontrada:
+      description: La cancha no existe o no es visible para el usuario (`CANCHA_NO_ENCONTRADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CANCHA_NO_ENCONTRADA, mensaje: La cancha no existe } }
+    TarifaNoEncontrada:
+      description: La tarifa no existe o ya está desactivada (`TARIFA_NO_ENCONTRADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: TARIFA_NO_ENCONTRADA, mensaje: La tarifa no existe } }
+    CanchaDuplicada:
+      description: Ya existe una cancha con ese nombre en el complejo (`CANCHA_DUPLICADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CANCHA_DUPLICADA, mensaje: Ya existe una cancha con ese nombre en este complejo } }
+    TarifaCruzada:
+      description: La tarifa se cruza con otra activa del mismo tipo de día (`TARIFA_CRUZADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: TARIFA_CRUZADA, mensaje: La tarifa se cruza con otra tarifa activa del mismo tipo de día } }
+    DemasiadasPeticiones:
+      description: Se superó el límite de peticiones (`DEMASIADAS_PETICIONES`).
+      headers:
+        Retry-After:
+          description: Segundos hasta que se reinicia la ventana.
+          schema:
+            type: integer
+        RateLimit-Limit:
+          schema:
+            type: integer
+        RateLimit-Remaining:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: DEMASIADAS_PETICIONES, mensaje: Hiciste demasiados intentos. Espera un momento e intenta de nuevo. } }
+    ErrorInterno:
+      description: Error inesperado (`ERROR_INTERNO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: ERROR_INTERNO, mensaje: Ocurrió un error inesperado. Intenta de nuevo en unos minutos. } }
+
+  schemas:
+    # ---------------------------------------------------------- Comunes
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [codigo, mensaje]
+          properties:
+            codigo:
+              type: string
+              description: Código estable en MAYÚSCULAS (VALIDACION, NO_AUTENTICADO, TOKEN_INVALIDO, PROHIBIDO, CUENTA_INACTIVA, ..., DEMASIADAS_PETICIONES, ERROR_INTERNO).
+              example: VALIDACION
+            mensaje:
+              type: string
+              description: Mensaje en español apto para el usuario final.
+            detalles:
+              type: array
+              description: Errores por campo (solo en `VALIDACION`).
+              items:
+                type: object
+                required: [campo, mensaje]
+                properties:
+                  campo:
+                    type: string
+                    example: contrasena
+                  mensaje:
+                    type: string
+            datos:
+              description: Información adicional estructurada (p. ej. reservas en conflicto).
+              type: object
+              additionalProperties: true
+    Salud:
+      type: object
+      required: [estado, baseDeDatos]
+      properties:
+        estado:
+          type: string
+          enum: [ok, degradado]
+        baseDeDatos:
+          type: string
+          enum: [ok, sin conexión]
+    Mensaje:
+      type: object
+      required: [mensaje]
+      properties:
+        mensaje:
+          type: string
+    Hora:
+      type: string
+      description: Hora del día 'HH:MM' (24 h, America/Bogota).
+      pattern: '^([01]\d|2[0-4]):[0-5]\d$'
+      example: '08:00'
+    HoraEntrada:
+      type: string
+      description: |
+        Hora 'HH:MM' (también se acepta 'HH:MM:SS'; '24:00' es la medianoche de cierre). El servidor la normaliza a 'HH:MM'.
+      pattern: '^([01]\d|2[0-4]):[0-5]\d(:[0-5]\d)?$'
+      example: '08:00'
+    TipoFutbol:
+      type: integer
+      description: Jugadores por equipo.
+      enum: [5, 6, 7, 8, 11]
+    Celular:
+      type: string
+      description: Teléfono de 7 a 15 dígitos, con `+` opcional.
+      pattern: '^\+?\d{7,15}$'
+      example: '+573001234567'
+    UrlHttps:
+      type: string
+      format: uri
+      maxLength: 255
+      pattern: '^https://'
+      example: https://cdn.canchaya.co/foto.jpg
+    Posicion:
+      type: string
+      enum: [arquero, defensa, medio, delantero]
+    Nivel:
+      type: string
+      enum: [principiante, intermedio, avanzado]
+    Rol:
+      type: string
+      enum: [Jugador, AdminComplejo, Superadmin]
+    Contrasena:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 72
+      pattern: '^(?=.*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ])(?=.*\d).+$'
+      description: Al menos 8 caracteres, con una letra y un número.
+      example: Cancha2026
+    Correo:
+      type: string
+      format: email
+      maxLength: 150
+      description: Se recorta y se convierte a minúsculas.
+      example: juan@correo.com
+
+    # ---------------------------------------------------------- Auth
+    Registro:
+      type: object
+      required: [nombres, apellidos, username, correo, celular, fechaNacimiento, contrasena, aceptaTratamientoDatos]
+      properties:
+        nombres:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Juan
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Pérez
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: '^[a-zA-Z0-9_.]+$'
+          example: juan.perez
+        correo:
+          $ref: '#/components/schemas/Correo'
+        celular:
+          $ref: '#/components/schemas/Celular'
+        fechaNacimiento:
+          type: string
+          format: date
+          description: Entre 1900-01-01 y ayer (hora de Bogotá).
+          example: '1998-05-20'
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+        aceptaTratamientoDatos:
+          type: boolean
+          enum: [true]
+          description: Debe ser `true` (Ley 1581 de 2012).
+    Login:
+      type: object
+      required: [correo, contrasena]
+      properties:
+        correo:
+          $ref: '#/components/schemas/Correo'
+        contrasena:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 200
+          description: No se valida la política de contraseña al ingresar.
+      example: { correo: juan@correo.com, contrasena: Cancha2026 }
+    TokenEnlace:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 10
+          maxLength: 200
+          description: Token recibido en el enlace del correo.
+    RecuperarContrasena:
+      type: object
+      required: [correo]
+      properties:
+        correo:
+          $ref: '#/components/schemas/Correo'
+    RestablecerContrasena:
+      type: object
+      required: [token, contrasena]
+      properties:
+        token:
+          type: string
+          minLength: 10
+          maxLength: 200
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+    CambioContrasena:
+      type: object
+      required: [actual, nueva]
+      properties:
+        actual:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 200
+        nueva:
+          $ref: '#/components/schemas/Contrasena'
+    Perfil:
+      type: object
+      required: [nombres, apellidos, celular, fotoUrl, posicionPreferida, nivel]
+      properties:
+        nombres:
+          type: string
+          minLength: 1
+          maxLength: 80
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 80
+        celular:
+          $ref: '#/components/schemas/Celular'
+        fotoUrl:
+          type: string
+          format: uri
+          maxLength: 255
+          pattern: '^https://'
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+      example:
+        nombres: Juan
+        apellidos: Pérez
+        celular: '+573001234567'
+        fotoUrl: null
+        posicionPreferida: delantero
+        nivel: intermedio
+    Usuario:
+      type: object
+      required: [id, username, correo, nombres, apellidos, celular, fechaNacimiento, fotoUrl, posicionPreferida, nivel, rol, correoVerificado, fechaRegistro]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        correo:
+          type: string
+          format: email
+        nombres:
+          type: string
+        apellidos:
+          type: string
+        celular:
+          type: string
+        fechaNacimiento:
+          type: string
+          format: date
+        fotoUrl:
+          type: string
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+        rol:
+          $ref: '#/components/schemas/Rol'
+        correoVerificado:
+          type: boolean
+        fechaRegistro:
+          type: string
+          format: date-time
+      example:
+        id: 7
+        username: juan.perez
+        correo: juan@correo.com
+        nombres: Juan
+        apellidos: Pérez
+        celular: '+573001234567'
+        fechaNacimiento: '1998-05-20'
+        fotoUrl: null
+        posicionPreferida: delantero
+        nivel: intermedio
+        rol: Jugador
+        correoVerificado: false
+        fechaRegistro: '2026-11-07T15:04:05.000Z'
+    Sesion:
+      type: object
+      required: [token, expiraEn, usuario]
+      properties:
+        token:
+          type: string
+          description: 'JWT (HS256) para la cabecera `Authorization: Bearer`.'
+        expiraEn:
+          type: integer
+          description: Vigencia del token en segundos.
+          example: 7200
+        usuario:
+          $ref: '#/components/schemas/Usuario'
+    PerfilPublico:
+      type: object
+      description: Nunca incluye correo ni celular.
+      required: [username, nombres, apellidos, fotoUrl, posicionPreferida, nivel, fechaRegistro, partidosJugados, fairPlay, equipos]
+      properties:
+        username:
+          type: string
+        nombres:
+          type: string
+        apellidos:
+          type: string
+        fotoUrl:
+          type: string
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+        fechaRegistro:
+          type: string
+          format: date-time
+        partidosJugados:
+          type: integer
+        fairPlay:
+          type: number
+          nullable: true
+        equipos:
+          type: array
+          items:
+            type: object
+            required: [id, nombre, escudoUrl]
+            properties:
+              id:
+                type: integer
+              nombre:
+                type: string
+              escudoUrl:
+                type: string
+                nullable: true
+
+    # ---------------------------------------------------------- Complejos
+    Servicio:
+      type: object
+      required: [id, nombre]
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+          example: Parqueadero
+    Foto:
+      type: object
+      required: [id, url, orden]
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          format: uri
+        orden:
+          type: integer
+    FotoInput:
+      type: object
+      required: [url]
+      properties:
+        url:
+          $ref: '#/components/schemas/UrlHttps'
+    ServiciosInput:
+      type: object
+      required: [servicioIds]
+      properties:
+        servicioIds:
+          type: array
+          maxItems: 20
+          items:
+            type: integer
+            minimum: 1
+      example: { servicioIds: [1, 3] }
+    EstadoComplejo:
+      type: string
+      enum: [pendiente, activo, rechazado]
+    ComplejoInput:
+      type: object
+      required: [nombre, direccion, ciudad, barrio, telefono]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 120
+        descripcion:
+          type: string
+          nullable: true
+          maxLength: 2000
+          description: Un texto vacío se guarda como `null`.
+        direccion:
+          type: string
+          minLength: 1
+          maxLength: 200
+        ciudad:
+          type: string
+          minLength: 1
+          maxLength: 80
+        barrio:
+          type: string
+          minLength: 1
+          maxLength: 80
+        telefono:
+          $ref: '#/components/schemas/Celular'
+        latitud:
+          type: number
+          nullable: true
+          minimum: -90
+          maximum: 90
+        longitud:
+          type: number
+          nullable: true
+          minimum: -180
+          maximum: 180
+        porcentajeAbono:
+          type: number
+          minimum: 10
+          maximum: 100
+          default: 50
+          description: RN-03. Porcentaje del valor de la reserva que se paga como abono (50 % por defecto).
+        servicioIds:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            type: integer
+            minimum: 1
+      example:
+        nombre: Complejo El Golazo
+        descripcion: Canchas sintéticas con iluminación.
+        direccion: Calle 100 # 15-20
+        ciudad: Bogotá
+        barrio: Chicó
+        telefono: '+573001234567'
+        latitud: 4.6867
+        longitud: -74.0447
+        porcentajeAbono: 50
+        servicioIds: [1, 2]
+    Complejo:
+      type: object
+      required: [id, adminId, nombre, descripcion, direccion, ciudad, barrio, telefono, latitud, longitud, porcentajeAbono, estado, motivoRechazo, fechaCreacion, servicios, fotos]
+      properties:
+        id:
+          type: integer
+        adminId:
+          type: integer
+        nombre:
+          type: string
+        descripcion:
+          type: string
+          nullable: true
+        direccion:
+          type: string
+        ciudad:
+          type: string
+        barrio:
+          type: string
+        telefono:
+          type: string
+        latitud:
+          type: number
+          nullable: true
+        longitud:
+          type: number
+          nullable: true
+        porcentajeAbono:
+          type: number
+        estado:
+          $ref: '#/components/schemas/EstadoComplejo'
+        motivoRechazo:
+          type: string
+          nullable: true
+        fechaCreacion:
+          type: string
+          format: date-time
+        servicios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Servicio'
+        fotos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Foto'
+    ComplejoEnvuelto:
+      type: object
+      required: [complejo]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/Complejo'
+    ComplejoResumen:
+      type: object
+      required: [id, nombre, direccion, ciudad, barrio, estado, fotoPrincipal, servicios, tiposFutbol, canchasActivas, precioDesde]
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        direccion:
+          type: string
+        ciudad:
+          type: string
+        barrio:
+          type: string
+        estado:
+          $ref: '#/components/schemas/EstadoComplejo'
+        fotoPrincipal:
+          type: string
+          nullable: true
+        servicios:
+          type: array
+          description: Nombres de los servicios.
+          items:
+            type: string
+        tiposFutbol:
+          type: array
+          description: Tipos de fútbol de las canchas activas.
+          items:
+            $ref: '#/components/schemas/TipoFutbol'
+        canchasActivas:
+          type: integer
+        precioDesde:
+          type: integer
+          nullable: true
+          description: Precio mínimo (COP) entre las tarifas activas de canchas activas.
+      example:
+        id: 1
+        nombre: Complejo El Golazo
+        direccion: Calle 100 # 15-20
+        ciudad: Bogotá
+        barrio: Chicó
+        estado: activo
+        fotoPrincipal: https://cdn.canchaya.co/foto.jpg
+        servicios: [Parqueadero, Cafetería]
+        tiposFutbol: [5, 7]
+        canchasActivas: 3
+        precioDesde: 80000
+    ComplejosResumenLista:
+      type: object
+      required: [complejos]
+      properties:
+        complejos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplejoResumen'
+    ComplejoDetalle:
+      type: object
+      required: [complejo, canchas, horarios, esGestor]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/Complejo'
+        canchas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Cancha'
+        horarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Horario'
+        esGestor:
+          type: boolean
+          description: Verdadero si quien consulta es el administrador del complejo o Superadmin.
+    Aprobacion:
+      type: object
+      required: [aprobar]
+      properties:
+        aprobar:
+          type: boolean
+        motivo:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Obligatorio cuando `aprobar` es `false`.
+    CanchaInput:
+      type: object
+      required: [nombre, tipoFutbol, superficie]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 60
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        superficie:
+          type: string
+          minLength: 1
+          maxLength: 40
+          example: Sintética
+        techada:
+          type: boolean
+          default: false
+        iluminacion:
+          type: boolean
+          default: false
+        capacidadJugadores:
+          type: integer
+          minimum: 2
+          maximum: 40
+          description: Por defecto `tipoFutbol * 2`.
+        estado:
+          type: string
+          enum: [activa, inactiva]
+          default: activa
+      example:
+        nombre: Cancha 1
+        tipoFutbol: 5
+        superficie: Sintética
+        techada: false
+        iluminacion: true
+        capacidadJugadores: 10
+        estado: activa
+    Cancha:
+      type: object
+      required: [id, complejoId, nombre, tipoFutbol, superficie, techada, iluminacion, capacidadJugadores, estado]
+      properties:
+        id:
+          type: integer
+        complejoId:
+          type: integer
+        nombre:
+          type: string
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        superficie:
+          type: string
+        techada:
+          type: boolean
+        iluminacion:
+          type: boolean
+        capacidadJugadores:
+          type: integer
+        estado:
+          type: string
+          enum: [activa, inactiva]
+    CanchaEnvuelta:
+      type: object
+      required: [cancha]
+      properties:
+        cancha:
+          $ref: '#/components/schemas/Cancha'
+
+    # ---------------------------------------------------------- Horarios
+    HorarioHabitualInput:
+      type: object
+      required: [dias]
+      properties:
+        dias:
+          type: array
+          maxItems: 7
+          description: Un elemento por día abierto; `diaSemana` no puede repetirse.
+          items:
+            type: object
+            required: [diaSemana, horaApertura, horaCierre, duracionTurnoMin]
+            properties:
+              diaSemana:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: ISO, 1 = lunes ... 7 = domingo.
+              horaApertura:
+                $ref: '#/components/schemas/HoraEntrada'
+              horaCierre:
+                $ref: '#/components/schemas/HoraEntrada'
+              duracionTurnoMin:
+                type: integer
+                minimum: 30
+                maximum: 180
+                description: Duración de cada turno en minutos.
+      example:
+        dias:
+          - { diaSemana: 1, horaApertura: '08:00', horaCierre: '22:00', duracionTurnoMin: 60 }
+          - { diaSemana: 6, horaApertura: '07:00', horaCierre: '23:00', duracionTurnoMin: 60 }
+    HorarioEspecialInput:
+      type: object
+      required: [fecha, horaApertura, horaCierre, duracionTurnoMin]
+      properties:
+        fecha:
+          type: string
+          format: date
+          description: No puede estar en el pasado.
+        horaApertura:
+          $ref: '#/components/schemas/HoraEntrada'
+        horaCierre:
+          $ref: '#/components/schemas/HoraEntrada'
+        duracionTurnoMin:
+          type: integer
+          minimum: 30
+          maximum: 180
+      example: { fecha: '2026-12-24', horaApertura: '08:00', horaCierre: '16:00', duracionTurnoMin: 60 }
+    Horario:
+      type: object
+      description: Habitual (`diaSemana` con valor y `fechaEspecial` null) o especial (`fechaEspecial` con valor y `diaSemana` null).
+      required: [id, diaSemana, fechaEspecial, horaApertura, horaCierre, duracionTurnoMin]
+      properties:
+        id:
+          type: integer
+        diaSemana:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 7
+        fechaEspecial:
+          type: string
+          format: date
+          nullable: true
+        horaApertura:
+          $ref: '#/components/schemas/Hora'
+        horaCierre:
+          $ref: '#/components/schemas/Hora'
+        duracionTurnoMin:
+          type: integer
+    ReservaActiva:
+      type: object
+      description: Reserva activa que queda en conflicto (la provee el módulo de reservas).
+      required: [id, codigo, canchaId, fecha, horaInicio, horaFin]
+      properties:
+        id:
+          type: integer
+        codigo:
+          type: string
+        canchaId:
+          type: integer
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+    HorariosGuardados:
+      type: object
+      required: [horarios, advertencias]
+      properties:
+        horarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Horario'
+        advertencias:
+          type: object
+          required: [reservasFueraDeHorario]
+          properties:
+            reservasFueraDeHorario:
+              type: array
+              description: Reservas activas desde hoy que quedan fuera del horario (no se eliminan).
+              items:
+                $ref: '#/components/schemas/ReservaActiva'
+
+    # ---------------------------------------------------------- Tarifas
+    TarifaInput:
+      type: object
+      required: [tipoDia, horaInicio, horaFin, precio]
+      properties:
+        tipoDia:
+          type: string
+          enum: [semana, fin_semana_festivo]
+          description: Fin de semana incluye sábado, domingo y festivos de Colombia.
+        horaInicio:
+          $ref: '#/components/schemas/HoraEntrada'
+        horaFin:
+          allOf:
+            - $ref: '#/components/schemas/HoraEntrada'
+          description: Debe ser posterior a `horaInicio`.
+        precio:
+          type: integer
+          minimum: 1
+          maximum: 100000000
+          description: Pesos colombianos (COP), sin decimales.
+      example: { tipoDia: semana, horaInicio: '08:00', horaFin: '18:00', precio: 80000 }
+    Tarifa:
+      type: object
+      required: [id, canchaId, tipoDia, horaInicio, horaFin, precio, activa]
+      properties:
+        id:
+          type: integer
+        canchaId:
+          type: integer
+        tipoDia:
+          type: string
+          enum: [semana, fin_semana_festivo]
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precio:
+          type: integer
+          description: COP.
+        activa:
+          type: boolean
+    TarifaEnvuelta:
+      type: object
+      required: [tarifa]
+      properties:
+        tarifa:
+          $ref: '#/components/schemas/Tarifa'
+
+    # ---------------------------------------------------------- Bloqueos y franjas
+    BloqueoInput:
+      type: object
+      required: [fechaInicio, fechaFin, motivo]
+      properties:
+        fechaInicio:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$'
+          description: Fecha y hora local de Bogotá, 'YYYY-MM-DDTHH:MM' (también se acepta un espacio en lugar de 'T').
+          example: '2026-12-05T08:00'
+        fechaFin:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$'
+          description: Posterior a `fechaInicio` y no en el pasado.
+          example: '2026-12-05T12:00'
+        motivo:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Mantenimiento del césped
+    Bloqueo:
+      type: object
+      required: [id, canchaId, fechaInicio, fechaFin, motivo]
+      properties:
+        id:
+          type: integer
+        canchaId:
+          type: integer
+        fechaInicio:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$'
+          description: 'YYYY-MM-DDTHH:MM, hora de Bogotá.'
+          example: '2026-12-05T08:00'
+        fechaFin:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$'
+          example: '2026-12-05T12:00'
+        motivo:
+          type: string
+    Franja:
+      type: object
+      required: [horaInicio, horaFin, precio, estado]
+      properties:
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precio:
+          type: integer
+          nullable: true
+          description: COP; `null` si no hay tarifa.
+        estado:
+          type: string
+          enum: [libre, bloqueada, pasada, sin_tarifa]
+      example: { horaInicio: '18:00', horaFin: '19:00', precio: 80000, estado: libre }
+    FranjasDia:
+      type: object
+      required: [cancha, franjas]
+      properties:
+        cancha:
+          $ref: '#/components/schemas/Cancha'
+        franjas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Franja'
