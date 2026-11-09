@@ -413,3 +413,48 @@ textarea.field__control { resize: vertical; }
 
 /* Grupo de botones de acción (páginas de error y diálogos) */
 .acciones { display: flex; flex-wrap: wrap; gap: var(--space-3, 0.75rem); margin-top: 1rem; }
+
+/* ---------- Reservas y pagos (EP-03, EP-04) ---------- */
+.summary { display: grid; grid-template-columns: 1fr; gap: var(--space-2); margin: 0 0 var(--space-4); }
+.summary div { display: flex; justify-content: space-between; gap: var(--space-3); border-bottom: 1px solid var(--color-border); padding: var(--space-2) 0; }
+.summary dt { font-weight: 600; color: var(--color-muted); }
+.summary dd { margin: 0; text-align: right; }
+.countdown { font-size: var(--fs-lg); padding: var(--space-3) var(--space-4); border-radius: var(--radius); background: var(--color-warning-bg); color: var(--color-warning); }
+.countdown p { margin: 0; }
+.countdown--vencido { background: var(--color-danger-bg); color: var(--color-danger); }
+.countdown__time { font-variant-numeric: tabular-nums; font-size: var(--fs-xl); }
+.radio-group { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); margin: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.radio-group legend { font-weight: 700; padding: 0 var(--space-2); }
+.radio-group__option { display: flex; align-items: center; gap: var(--space-3); min-height: var(--tap); cursor: pointer; }
+.radio-group__option input { width: 1.25rem; height: 1.25rem; accent-color: var(--color-brand); }
+.slot-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.slot-fieldset legend { font-weight: 700; margin-bottom: var(--space-2); }
+.slot-grid--compact { grid-template-columns: repeat(3, 1fr); }
+a.slot--link { text-decoration: none; justify-content: center; }
+a.slot--link:hover { background: var(--color-brand); color: #fff; }
+
+.table-wrap { overflow-x: auto; width: 100%; }
+.data-table { width: 100%; border-collapse: collapse; background: var(--color-surface); font-size: var(--fs-sm); }
+.data-table th, .data-table td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.data-table thead th { background: var(--color-brand-light); white-space: nowrap; }
+
+.cal--grid { display: none; overflow-x: auto; }
+.cal--grid table { border-collapse: collapse; width: 100%; min-width: 40rem; background: var(--color-surface); }
+.cal--grid th, .cal--grid td { border: 1px solid var(--color-border); padding: var(--space-1) var(--space-2); vertical-align: top; text-align: left; }
+.cal--grid thead th { background: var(--color-brand-light); }
+.cal--grid tbody th { width: 4.5rem; white-space: nowrap; font-weight: 600; }
+.cal--list { display: flex; flex-direction: column; gap: var(--space-4); }
+.cal__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.cal-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: var(--tap); padding: var(--space-2); border-radius: var(--radius); border: 2px solid var(--color-brand); background: var(--color-success-bg); color: var(--color-text); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; margin-bottom: var(--space-1); }
+.cal-chip--pendiente_pago { border-color: var(--color-warning); background: var(--color-warning-bg); }
+.cal-chip--completada, .cal-chip--no_asistio { border-color: var(--color-info); background: var(--color-info-bg); }
+.cal-chip.is-inactive { border-color: var(--color-border); background: #f0f2f1; color: var(--color-muted); }
+.cal-chip__time { font-weight: 700; }
+.cal-chip__code { font-variant-numeric: tabular-nums; }
+
+@media (min-width: 768px) {
+  .summary { max-width: 32rem; }
+  .slot-grid--compact { grid-template-columns: repeat(4, 1fr); }
+  .cal--grid { display: block; }
+  .cal--list { display: none; }
+}

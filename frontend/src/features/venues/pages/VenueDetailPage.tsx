@@ -1,13 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Alert, Badge, Card, Input, Spinner } from '../../../components/ui';
 import { ApiError } from '../../../lib/api';
 import { formatHora, hoyBogota } from '../../../lib/format';
-import { obtenerComplejo, obtenerFranjas } from '../api';
+import { disponibilidadComplejo } from '../../bookings/api';
+import { rutaReservar } from '../../bookings/pages/AvailabilityPage';
+import { obtenerComplejo } from '../api';
 import { CourtCard } from '../components/CourtCard';
 import { SlotGrid, SlotLegend } from '../components/SlotGrid';
-import type { Cancha, Foto, Horario } from '../types';
+import type { Foto, Horario } from '../types';
 import { DIAS_SEMANA, mensajeError } from '../utils';
 
 function Galeria({ fotos, nombre }: { fotos: Foto[]; nombre: string }) {
@@ -53,20 +55,29 @@ function HorarioSemanal({ horarios }: { horarios: Horario[] }) {
   );
 }
 
-function FranjasCancha({ cancha, fecha }: { cancha: Cancha; fecha: string }) {
+function Disponibilidad({ complejoId, fecha }: { complejoId: number; fecha: string }) {
+  const navigate = useNavigate();
   const consulta = useQuery({
-    queryKey: ['franjas', cancha.id, fecha],
-    queryFn: () => obtenerFranjas(cancha.id, fecha),
+    queryKey: ['disponibilidad-complejo', complejoId, fecha],
+    queryFn: () => disponibilidadComplejo(complejoId, fecha),
   });
+  if (consulta.isPending) return <Spinner label="Cargando turnos…" />;
+  if (consulta.isError) return <Alert tone="error">{mensajeError(consulta.error)}</Alert>;
   return (
-    <Card>
-      <h3>
-        {cancha.nombre} <span className="muted">· Fútbol {cancha.tipoFutbol}</span>
-      </h3>
-      {consulta.isPending && <Spinner label="Cargando turnos…" />}
-      {consulta.isError && <Alert tone="error">{mensajeError(consulta.error)}</Alert>}
-      {consulta.isSuccess && <SlotGrid etiqueta={cancha.nombre} franjas={consulta.data.franjas} />}
-    </Card>
+    <>
+      {consulta.data.canchas.map((c) => (
+        <Card key={c.id}>
+          <h3>
+            {c.nombre} <span className="muted">· Fútbol {c.tipoFutbol}</span>
+          </h3>
+          <SlotGrid
+            etiqueta={c.nombre}
+            franjas={c.franjas}
+            onSeleccionar={(f) => void navigate(rutaReservar(c.id, fecha, f.horaInicio))}
+          />
+        </Card>
+      ))}
+    </>
   );
 }
 
@@ -162,9 +173,7 @@ export function VenueDetailPage() {
           <h2>Disponibilidad</h2>
           <Input label="Fecha" type="date" min={hoy} value={fecha} onChange={(e) => setFecha(e.target.value && e.target.value >= hoy ? e.target.value : hoy)} />
           <SlotLegend />
-          {activas.map((c) => (
-            <FranjasCancha key={c.id} cancha={c} fecha={fecha} />
-          ))}
+          <Disponibilidad complejoId={complejo.id} fecha={fecha} />
         </section>
       )}
     </div>

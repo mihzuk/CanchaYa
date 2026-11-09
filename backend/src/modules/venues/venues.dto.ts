@@ -239,6 +239,21 @@ export interface FranjaDto {
   estado: EstadoFranja;
 }
 
+/** Cancha con los datos de su complejo, para la búsqueda de disponibilidad (HU-10). */
+export interface CanchaBusquedaDto extends CanchaDto {
+  complejo: {
+    id: number;
+    nombre: string;
+    ciudad: string;
+    barrio: string;
+    direccion: string;
+    latitud: number | null;
+    longitud: number | null;
+    porcentajeAbono: number;
+    fotoPrincipal: string | null;
+  };
+}
+
 /** Reserva activa vista desde venues (la provee bookings; ver `registrarConsultaReservas`). */
 export interface ReservaActivaDto {
   id: number;

@@ -5,7 +5,9 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { parse as parseYaml } from 'yaml';
-import { authRoutes, iniciarModuloAuth, usuariosRoutes } from './modules/auth';
+import { authApi, authRoutes, iniciarModuloAuth, usuariosRoutes } from './modules/auth';
+import { bookingsRoutes, iniciarModuloBookings, registrarResolverNombres } from './modules/bookings';
+import { paymentsRoutes } from './modules/payments';
 import { venuesRoutes } from './modules/venues';
 import { env } from './shared/config/env';
 import { pool } from './shared/database/pool';
@@ -18,6 +20,9 @@ import { logger } from './shared/logger/logger';
  */
 export function createApp(): Express {
   iniciarModuloAuth();
+  iniciarModuloBookings();
+  // Composición: bookings muestra al administrador el nombre de los jugadores sin depender de auth.
+  registrarResolverNombres((ids) => authApi.nombresDeUsuarios(ids));
 
   const app = express();
   app.disable('x-powered-by');
@@ -75,6 +80,8 @@ export function createApp(): Express {
   app.use('/api/auth', authRoutes);
   app.use('/api/usuarios', usuariosRoutes);
   app.use('/api', venuesRoutes);
+  app.use('/api', bookingsRoutes);
+  app.use('/api', paymentsRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

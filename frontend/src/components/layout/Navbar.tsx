@@ -35,6 +35,8 @@ export function Navbar() {
         </button>
         <nav id="menu-principal" className={`navbar__menu${abierto ? ' is-open' : ''}`} aria-label="Principal">
           <NavLink to="/complejos">Complejos</NavLink>
+          <NavLink to="/disponibilidad">Buscar cancha</NavLink>
+          {usuario && <NavLink to="/mis-reservas">Mis reservas</NavLink>}
           {usuario && <NavLink to="/mis-complejos">Mis complejos</NavLink>}
           {usuario?.rol === 'Superadmin' && <NavLink to="/admin/complejos">Aprobar complejos</NavLink>}
           {usuario ? (

@@ -338,7 +338,7 @@ La entidad "hija" es la que contiene la llave foránea. Salvo que se indique otr
 | 19 | Pago | Reserva | |
 | 20 | Pago | Usuario | FK opcional |
 | 21 | Pago | Equipo | FK opcional (pago dividido entre equipos) |
-| 22 | Reembolso | Pago | 1 : 0..1 |
+| 22 | Reembolso | Pago | 1 : N (la suma de los reembolsos no supera el valor del pago) |
 | 23 | Usuario | Rol | |
 | 24 | TokenUsuario | Usuario | |
 | 25 | ReporteUsuario | Usuario | Quien reporta |
@@ -424,7 +424,7 @@ CanchaYa/
 | Sprint | Alcance | Estado |
 |---|---|---|
 | 1 | Usuarios (HU-01 a HU-04), complejos, canchas, horarios, tarifas y bloqueos (HU-05 a HU-09), HT-01 a HT-04, HT-10 | Terminado |
-| 2 | Reservas y pagos básicos | Pendiente |
+| 2 | Reservas (HU-10 a HU-14), pagos (HU-16, HU-17), cancelación y reprogramación (HU-12), reembolsos (HU-18), HT-05, HT-06, HT-08 | Terminado |
 | 3 | Equipos y Busca Partido | Pendiente |
 | 4 | Pagos divididos, reembolsos, notificaciones y reputación | Pendiente |
 | 5 | Reserva recurrente, chat, reportes y administración | Pendiente |
@@ -460,6 +460,15 @@ npm run dev                     # web en http://localhost:5173
 
 Sin `SMTP_HOST`, en desarrollo los correos (verificación de cuenta y recuperación de contraseña) se escriben en el log del backend con su enlace.
 
+### Pagos en el ambiente de pruebas (HT-08)
+
+La pasarela de pagos es **simulada** (detrás de la interfaz `PaymentGateway`, lista para conectar Wompi, PayU o Mercado Pago):
+
+- Tarjeta: un número terminado en `0002` es rechazado; cualquier otro se aprueba.
+- PSE y Nequi: el formulario permite elegir el resultado simulado (aprobar o rechazar).
+
+Una reserva sin pago se retiene 15 minutos (RN-02); una tarea programada la expira cada minuto.
+
 ### Cuentas de prueba (seed)
 
 Todas usan la contraseña `CanchaYa2026`. Solo existen si se ejecuta `npm run seed`.
@@ -494,5 +503,6 @@ Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el di
 | Reserva | `motivo_cancelacion` | HU-28.3: notificar el motivo cuando el complejo cancela o mueve una reserva. |
 | PartidoAbierto | `fecha_rival_confirmado`, `alerta_sin_rival_enviada` | HU-26.2 (plazo de 2 h para el abono del rival) y HU-22.3 (alerta única de 6 h). |
 | HorarioAtencion | `cerrado` (y horas opcionales) | HU-07.2: una fecha especial puede cerrar el complejo todo el día (migración `010`). |
+| Reembolso | `pago_id` deja de ser único | HU-12 / HU-18: un pago puede tener varios reembolsos (p. ej. la diferencia de una reprogramación y luego la cancelación); un disparador impide que sumen más que el pago (migración `011`). |
 
 ---

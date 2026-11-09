@@ -58,6 +58,28 @@ export function correoRecuperacion(para: string, nombres: string, token: string,
   };
 }
 
+/** HU-16 criterio 3: comprobante del pago aprobado. */
+export function correoComprobantePago(
+  para: string,
+  nombres: string,
+  d: { codigo: string; complejo: string; cancha: string; fecha: string; hora: string; valor: string; metodo: string; referencia: string; saldo: string },
+): Correo {
+  const lineas = [
+    `Hola ${nombres}, recibimos tu pago. Tu reserva ${d.codigo} está confirmada.`,
+    `Complejo: ${d.complejo} · ${d.cancha}`,
+    `Fecha y hora: ${d.fecha}, ${d.hora}`,
+    `Valor pagado: ${d.valor} (${d.metodo})`,
+    `Referencia: ${d.referencia}`,
+    `Saldo por pagar en el complejo: ${d.saldo}`,
+  ];
+  return {
+    para,
+    asunto: `Comprobante de pago · Reserva ${d.codigo}`,
+    texto: lineas.join('\n'),
+    html: plantilla('Comprobante de pago', lineas, { texto: 'Ver mis reservas', url: `${env.APP_URL.replace(/\/$/, '')}/mis-reservas` }),
+  };
+}
+
 export function correoGenerico(para: string, titulo: string, mensaje: string): Correo {
   return {
     para,

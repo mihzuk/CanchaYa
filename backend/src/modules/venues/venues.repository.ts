@@ -2,6 +2,7 @@ import { query, queryOne, type Queryable } from '../../shared/database/pool';
 import { normalizarHora, separarTimestampLocal, timestampLocal } from '../../shared/utils/time';
 import type {
   BloqueoDto,
+  CanchaBusquedaDto,
   CanchaDto,
   CanchaInput,
   ComplejoDto,
@@ -92,6 +93,9 @@ const aBloqueo = (b: BloqueoFila): BloqueoDto => ({
   motivo: b.motivo,
 });
 
+/** Máximo de canchas que revisa una búsqueda de disponibilidad (RNF-04). */
+const MAX_CANCHAS_BUSQUEDA = 1000;
+
 export const venuesRepository = {
   // --- Servicios y complejos ------------------------------------------------------------------
 
@@ -154,17 +158,18 @@ export const venuesRepository = {
     await query('SELECT id FROM complejo WHERE id = $1 FOR UPDATE', [id], db);
   },
 
-  async obtenerComplejo(id: number): Promise<ComplejoDto | undefined> {
-    const c = await queryOne<ComplejoFila>('SELECT * FROM complejo WHERE id = $1', [id]);
+  /** `db`: dentro de una transacción, para no pedir una segunda conexión al pool. */
+  async obtenerComplejo(id: number, db?: Queryable): Promise<ComplejoDto | undefined> {
+    const c = await queryOne<ComplejoFila>('SELECT * FROM complejo WHERE id = $1', [id], db);
     if (!c) return undefined;
-    const [servicios, fotos] = await Promise.all([
-      query<ServicioDto>(
-        `SELECT s.id, s.nombre FROM complejo_servicio cs JOIN servicio s ON s.id = cs.servicio_id
-          WHERE cs.complejo_id = $1 ORDER BY s.id`,
-        [id],
-      ),
-      query<FotoDto>('SELECT id, url, orden FROM foto_complejo WHERE complejo_id = $1 ORDER BY orden, id', [id]),
-    ]);
+    // En secuencia: un cliente de transacción no admite consultas en paralelo.
+    const servicios = await query<ServicioDto>(
+      `SELECT s.id, s.nombre FROM complejo_servicio cs JOIN servicio s ON s.id = cs.servicio_id
+        WHERE cs.complejo_id = $1 ORDER BY s.id`,
+      [id],
+      db,
+    );
+    const fotos = await query<FotoDto>('SELECT id, url, orden FROM foto_complejo WHERE complejo_id = $1 ORDER BY orden, id', [id], db);
     return {
       id: c.id,
       adminId: c.admin_id,
@@ -238,6 +243,86 @@ export const venuesRepository = {
       params,
     );
     return { complejos: filas, total: total?.total ?? 0 };
+  },
+
+  // --- Consultas en lote para la disponibilidad (HU-10, RNF-04) -------------------------------
+
+  /** Canchas activas de complejos activos que cumplen los filtros, con los datos del complejo. */
+  async canchasParaBusqueda(f: { ciudad?: string; barrio?: string; tipoFutbol?: number; complejoId?: number }): Promise<{ canchas: CanchaBusquedaDto[]; limitado: boolean }> {
+    const condiciones = ["k.estado = 'activa'", "c.estado = 'activo'"];
+    const params: unknown[] = [];
+    const p = (v: unknown) => {
+      params.push(v);
+      return `$${params.length}`;
+    };
+    if (f.ciudad) condiciones.push(`lower(c.ciudad) = lower(${p(f.ciudad)})`);
+    if (f.barrio) condiciones.push(`lower(c.barrio) = lower(${p(f.barrio)})`);
+    if (f.tipoFutbol) condiciones.push(`k.tipo_futbol = ${p(f.tipoFutbol)}`);
+    if (f.complejoId) condiciones.push(`c.id = ${p(f.complejoId)}`);
+    const filas = await query<CanchaFila & { c_nombre: string; c_ciudad: string; c_barrio: string; c_direccion: string; latitud: number | null; longitud: number | null; porcentaje_abono: number; foto: string | null }>(
+      `SELECT k.*, c.nombre AS c_nombre, c.ciudad AS c_ciudad, c.barrio AS c_barrio, c.direccion AS c_direccion,
+              c.latitud, c.longitud, c.porcentaje_abono,
+              (SELECT f.url FROM foto_complejo f WHERE f.complejo_id = c.id ORDER BY f.orden, f.id LIMIT 1) AS foto
+         FROM cancha k JOIN complejo c ON c.id = k.complejo_id
+        WHERE ${condiciones.join(' AND ')}
+        ORDER BY c.nombre, k.nombre
+        LIMIT ${MAX_CANCHAS_BUSQUEDA + 1}`,
+      params,
+    );
+    const limitado = filas.length > MAX_CANCHAS_BUSQUEDA;
+    const canchas = filas.slice(0, MAX_CANCHAS_BUSQUEDA).map((k) => ({
+      ...aCancha(k),
+      complejo: {
+        id: k.complejo_id,
+        nombre: k.c_nombre,
+        ciudad: k.c_ciudad,
+        barrio: k.c_barrio,
+        direccion: k.c_direccion,
+        latitud: k.latitud,
+        longitud: k.longitud,
+        porcentajeAbono: k.porcentaje_abono,
+        fotoPrincipal: k.foto,
+      },
+    }));
+    return { canchas, limitado };
+  },
+
+  async horariosDeComplejos(ids: number[]): Promise<(HorarioDto & { complejoId: number })[]> {
+    if (!ids.length) return [];
+    const filas = await query<HorarioDto & { complejoId: number }>(
+      `SELECT id, complejo_id AS "complejoId", dia_semana AS "diaSemana", fecha_especial AS "fechaEspecial", cerrado,
+              hora_apertura AS "horaApertura", hora_cierre AS "horaCierre", duracion_turno_min AS "duracionTurnoMin"
+         FROM horario_atencion WHERE complejo_id = ANY($1::bigint[])`,
+      [ids],
+    );
+    return filas.map((h) => ({ ...aHorario(h), complejoId: h.complejoId }));
+  },
+
+  async tarifasDeCanchas(ids: number[]): Promise<TarifaDto[]> {
+    if (!ids.length) return [];
+    const filas = await query<TarifaDto>(`${SELECT_TARIFA} WHERE cancha_id = ANY($1::bigint[]) AND activa`, [ids]);
+    return filas.map(aTarifa);
+  },
+
+  async bloqueosDeCanchas(ids: number[], desde: string, hasta: string): Promise<BloqueoDto[]> {
+    if (!ids.length) return [];
+    const filas = await query<BloqueoFila>(
+      `SELECT id, cancha_id, fecha_inicio, fecha_fin, motivo FROM bloqueo_horario
+        WHERE cancha_id = ANY($1::bigint[]) AND tsrange(fecha_inicio, fecha_fin, '[)') && tsrange($2::timestamp, $3::timestamp, '[)')`,
+      [ids, desde, hasta],
+    );
+    return filas.map(aBloqueo);
+  },
+
+  /** Hay algún bloqueo de la cancha que se cruce con el rango (hora local). */
+  async hayBloqueoEnRango(canchaId: number, desde: string, hasta: string, db?: Queryable): Promise<boolean> {
+    const fila = await queryOne<{ hay: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM bloqueo_horario
+                       WHERE cancha_id = $1 AND tsrange(fecha_inicio, fecha_fin, '[)') && tsrange($2::timestamp, $3::timestamp, '[)')) AS hay`,
+      [canchaId, desde, hasta],
+      db,
+    );
+    return fila?.hay ?? false;
   },
 
   // --- Fotos ----------------------------------------------------------------------------------

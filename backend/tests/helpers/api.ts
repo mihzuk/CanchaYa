@@ -5,6 +5,8 @@ import supertest from 'supertest';
 import { createApp } from '../../src/app';
 import type { MemoryMailer } from '../../src/infrastructure/email/Mailer';
 import { mailer } from '../../src/infrastructure/email/SmtpMailer';
+import { invalidarParametros } from '../../src/shared/config/parametros';
+import { diaSemanaIso, hoyBogota, sumarDias } from '../../src/shared/utils/time';
 import { pool, query, queryOne } from '../../src/shared/database/pool';
 import type { Rol } from '../../src/shared/middleware/authenticate';
 import { reiniciarLimitadores } from '../../src/shared/middleware/rateLimiter';
@@ -26,6 +28,7 @@ export async function limpiarBd(): Promise<void> {
   if (aVaciar.length) await pool.query(`TRUNCATE ${aVaciar.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`);
   correos.limpiar();
   reiniciarLimitadores();
+  invalidarParametros();
 }
 
 export const CONTRASENA = 'Clave1234';
@@ -100,4 +103,28 @@ export async function crearComplejoActivo(admin: UsuarioPrueba, opciones: { nomb
   await api().post(`/api/canchas/${canchaId}/tarifas`).set(admin.auth).send({ tipoDia: 'semana', horaInicio: '08:00', horaFin: '18:00', precio: 80000 }).expect(201);
   await api().post(`/api/canchas/${canchaId}/tarifas`).set(admin.auth).send({ tipoDia: 'semana', horaInicio: '18:00', horaFin: '23:00', precio: 120000 }).expect(201);
   return { complejoId, canchaId };
+}
+
+/** Próxima fecha (desde mañana) cuyo día ISO es `diaIso` (1 = lunes ... 7 = domingo). */
+export function proximoDia(diaIso: number, desde = 1): string {
+  let f = sumarDias(hoyBogota(), desde);
+  while (diaSemanaIso(f) !== diaIso) f = sumarDias(f, 1);
+  return f;
+}
+
+/** Crea una reserva por la API y devuelve el cuerpo de la respuesta. */
+export async function reservar(jugador: UsuarioPrueba, canchaId: number, fecha: string, horaInicio: string) {
+  const r = await api().post('/api/reservas').set(jugador.auth).send({ canchaId, fecha, horaInicio });
+  if (r.status !== 201) throw new Error(`No se creó la reserva: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body.reserva as { id: number; codigo: string; estado: string; precioTotal: number; abonoRequerido: number; saldoPendiente: number };
+}
+
+/** Paga el abono en línea con la pasarela simulada (tarjeta aprobada). */
+export async function pagarAbono(jugador: UsuarioPrueba, reservaId: number) {
+  const r = await api()
+    .post(`/api/reservas/${reservaId}/pagos/abono`)
+    .set(jugador.auth)
+    .send({ metodo: 'tarjeta', datos: { numeroTarjeta: '4242 4242 4242 4242' } });
+  if (r.status !== 201) throw new Error(`No se pagó el abono: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body;
 }
