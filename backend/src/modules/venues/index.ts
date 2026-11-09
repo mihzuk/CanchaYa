@@ -7,10 +7,11 @@ import { venuesService } from './venues.service';
 
 export { venuesRoutes } from './venues.routes';
 export { registrarConsultaReservas, type ConsultaReservas } from './venues.service';
-export { generarFranjas, seCruzan, franjaSeCruzaConRango, type Franja } from './domain/slots';
-export { horarioParaFecha, franjasDelDia } from './domain/schedule';
+export { generarFranjas, seCruzan, franjaSeCruzaConRango, marcarFranjas, type Franja, type EstadoFranja, type RangoLocal } from './domain/slots';
+export { horarioParaFecha, franjasDelDia, estaAbierto, type Horario } from './domain/schedule';
 export { precioDeFranja, tipoDeDia, type TipoDia } from './domain/rates';
 export type {
+  CanchaBusquedaDto,
   CanchaDto,
   ComplejoDto,
   ComplejoResumenDto,
@@ -31,6 +32,11 @@ export const venuesApi = {
   listarTarifas: venuesRepository.listarTarifas,
   listarBloqueos: venuesRepository.listarBloqueos,
   listarCanchas: venuesRepository.listarCanchas,
+  canchasParaBusqueda: venuesRepository.canchasParaBusqueda,
+  horariosDeComplejos: venuesRepository.horariosDeComplejos,
+  tarifasDeCanchas: venuesRepository.tarifasDeCanchas,
+  bloqueosDeCanchas: venuesRepository.bloqueosDeCanchas,
+  hayBloqueoEnRango: venuesRepository.hayBloqueoEnRango,
   complejosPendientes: venuesService.complejosPendientes,
   resolverAprobacion: venuesService.resolverAprobacion,
 };

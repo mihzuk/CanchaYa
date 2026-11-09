@@ -36,6 +36,11 @@ const esquema = z.object({
   SMTP_FROM: z.string().default('CanchaYa <no-responder@canchaya.local>'),
   // Pagos (HT-08): "simulado" hasta integrar una pasarela real.
   PAYMENT_PROVIDER: z.enum(['simulado']).default('simulado'),
+  // Solo para un ambiente de demostración con NODE_ENV=production: permite la pasarela simulada.
+  PERMITIR_PAGOS_SIMULADOS: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => v === 'true'),
   // Tareas programadas (HT-06). Se desactivan en pruebas.
   JOBS_ENABLED: z
     .enum(['true', 'false'])
@@ -56,6 +61,11 @@ function cargar(): Env {
   const env = resultado.data;
   if (env.NODE_ENV === 'production' && /cambia-esto/.test(env.JWT_SECRET)) {
     throw new Error('JWT_SECRET de ejemplo en producción: configura un secreto propio.');
+  }
+  if (env.NODE_ENV === 'production' && env.PAYMENT_PROVIDER === 'simulado' && !env.PERMITIR_PAGOS_SIMULADOS) {
+    throw new Error(
+      'La pasarela simulada aprueba pagos sin cobrar: no se usa en producción. Configura una pasarela real o, solo para una demostración, PERMITIR_PAGOS_SIMULADOS=true.',
+    );
   }
   if (env.NODE_ENV === 'production' && !env.SMTP_HOST) {
     throw new Error('SMTP_HOST es obligatorio en producción: sin él los enlaces de los correos irían al log.');

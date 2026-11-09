@@ -11,6 +11,7 @@ export interface UsuarioSesion {
   estado: 'activo' | 'suspendido' | 'desactivado';
   correoVerificado: boolean;
   nombres: string;
+  correo: string;
   /** Tokens emitidos antes de esta fecha ya no valen (cambio o restablecimiento de contraseña). */
   credencialesDesde: Date;
 }

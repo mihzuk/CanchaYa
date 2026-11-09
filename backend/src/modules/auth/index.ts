@@ -3,6 +3,7 @@
  */
 import { eventBus } from '../../shared/events/eventBus';
 import { configurarResolverUsuario } from '../../shared/middleware/authenticate';
+import { authRepository } from './auth.repository';
 import { authService } from './auth.service';
 
 export { authRoutes, usuariosRoutes } from './auth.routes';
@@ -23,4 +24,6 @@ export function iniciarModuloAuth(): void {
 /** Para el módulo admin (HU-33). */
 export const authApi = {
   obtenerUsuario: (id: number) => authService.obtenerUsuario(id),
+  /** Nombres visibles (sin datos de contacto) de varios usuarios. */
+  nombresDeUsuarios: (ids: number[]) => authRepository.nombres(ids),
 };

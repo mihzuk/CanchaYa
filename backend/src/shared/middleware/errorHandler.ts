@@ -29,8 +29,16 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     return;
   }
 
-  // Errores de body-parser (JSON mal formado, cuerpo demasiado grande).
-  const e = err as { type?: string; status?: number };
+  // Errores de body-parser (JSON mal formado, cuerpo demasiado grande) y de concurrencia de PostgreSQL.
+  const e = err as { type?: string; status?: number; code?: string };
+  if (e?.code === '40P01' || e?.code === '40001') {
+    // Interbloqueo o conflicto de serialización entre transacciones: la operación no se aplicó.
+    logger.warn('Conflicto de concurrencia', { endpoint: `${req.method} ${req.originalUrl}`, codigo: e.code });
+    res.status(409).json({
+      error: { codigo: 'CONFLICTO_CONCURRENTE', mensaje: 'Otra operación modificó estos datos al mismo tiempo. Intenta de nuevo.' },
+    });
+    return;
+  }
   if (e?.type === 'entity.parse.failed') {
     res.status(400).json({ error: { codigo: 'JSON_INVALIDO', mensaje: 'El cuerpo de la petición no es un JSON válido.' } });
     return;

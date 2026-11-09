@@ -100,7 +100,7 @@ export const authRepository = {
   /** Sesión para el middleware: datos mínimos para autorizar. */
   sesion(id: number) {
     return queryOne<UsuarioSesion>(
-      `SELECT u.id, r.nombre AS rol, u.estado, u.correo_verificado AS "correoVerificado", u.nombres,
+      `SELECT u.id, r.nombre AS rol, u.estado, u.correo_verificado AS "correoVerificado", u.nombres, u.correo,
               u.credenciales_desde AS "credencialesDesde"
          FROM usuario u JOIN rol r ON r.id = u.rol_id
         WHERE u.id = $1`,
@@ -145,6 +145,16 @@ export const authRepository = {
         WHERE id = $1`,
       [id, p.nombres, p.apellidos, p.celular, p.fotoUrl, p.posicionPreferida, p.nivel],
     );
+  },
+
+  /** Nombres visibles de varios usuarios (para el administrador del complejo; sin correo ni celular). */
+  async nombres(ids: number[]): Promise<Map<number, string>> {
+    if (!ids.length) return new Map();
+    const filas = await query<{ id: number; nombre: string }>(
+      "SELECT id, nombres || ' ' || apellidos AS nombre FROM usuario WHERE id = ANY($1::bigint[])",
+      [ids],
+    );
+    return new Map(filas.map((f) => [f.id, f.nombre]));
   },
 
   /** Promueve a AdminComplejo solo si hoy es Jugador (no degrada a un Superadmin). */
