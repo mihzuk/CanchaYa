@@ -252,6 +252,18 @@ export function ManageVenuePage() {
       )}
       {complejo.estado === 'activo' && <Badge tone="success">Activo</Badge>}
 
+      <nav aria-label="Reservas y pagos" className="row-actions">
+        <Link className="btn btn--secondary" to={`/mis-complejos/${complejo.id}/reservas`}>
+          Calendario de reservas
+        </Link>
+        <Link className="btn btn--secondary" to={`/mis-complejos/${complejo.id}/pagos`}>
+          Pagos
+        </Link>
+        <Link className="btn btn--secondary" to={`/mis-complejos/${complejo.id}/reembolsos`}>
+          Reembolsos
+        </Link>
+      </nav>
+
       <div role="tablist" aria-label="Secciones del complejo" className="tabs">
         {PESTANAS.map((p) => (
           <button

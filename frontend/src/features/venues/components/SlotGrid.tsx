@@ -19,7 +19,7 @@ const ETIQUETAS: Record<EstadoFranja, string> = {
   partido_abierto: 'Partido abierto',
 };
 
-const LEYENDA: EstadoFranja[] = ['libre', 'bloqueada', 'pasada', 'sin_tarifa'];
+const LEYENDA: EstadoFranja[] = ['libre', 'reservada', 'partido_abierto', 'bloqueada', 'pasada', 'sin_tarifa'];
 
 export function SlotLegend() {
   return (
