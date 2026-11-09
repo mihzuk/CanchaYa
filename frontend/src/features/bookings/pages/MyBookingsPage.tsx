@@ -91,6 +91,11 @@ export function MyBookingsPage() {
                         Pagar
                       </Link>
                     )}
+                    {vista === 'proximas' && (r.estado === 'confirmada' || r.estado === 'pagada') && (
+                      <Link className="btn btn--secondary" to={`/partidos/publicar?reservaId=${r.id}`}>
+                        Publicar en Busca Partido
+                      </Link>
+                    )}
                     {ESTADOS_ACTIVOS.includes(r.estado) && (
                       <Button variant="secondary" onClick={() => setCancelando(r)}>
                         Cancelar o reprogramar

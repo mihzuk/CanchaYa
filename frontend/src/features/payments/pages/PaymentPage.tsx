@@ -57,9 +57,14 @@ function Pago({ reserva, limite }: { reserva: Reserva; limite: number }) {
           <p>
             Pagado: <strong>{formatCOP(pagada.totalPagado)}</strong> · Saldo pendiente en el complejo: <strong>{formatCOP(pagada.saldoPendiente)}</strong>
           </p>
-          <Link className="btn btn--primary" to="/mis-reservas">
-            Ver mis reservas
-          </Link>
+          <div className="row-actions">
+            <Link className="btn btn--primary" to="/mis-reservas">
+              Ver mis reservas
+            </Link>
+            <Link className="btn btn--secondary" to={`/partidos/publicar?reservaId=${pagada.id}`}>
+              Publicar en Busca Partido
+            </Link>
+          </div>
         </Card>
       </div>
     );

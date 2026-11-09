@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../errors/AppError';
 import { logger } from '../logger/logger';
-import { detallesDeZod } from '../http/validar';
+import { detallesDeZod, endpointParaLog } from '../http/validar';
 
 /**
  * Convierte cualquier error en una respuesta JSON uniforme (HT-03, HT-14):
@@ -33,7 +33,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   const e = err as { type?: string; status?: number; code?: string };
   if (e?.code === '40P01' || e?.code === '40001') {
     // Interbloqueo o conflicto de serialización entre transacciones: la operación no se aplicó.
-    logger.warn('Conflicto de concurrencia', { endpoint: `${req.method} ${req.originalUrl}`, codigo: e.code });
+    logger.warn('Conflicto de concurrencia', { endpoint: endpointParaLog(req), codigo: e.code });
     res.status(409).json({
       error: { codigo: 'CONFLICTO_CONCURRENTE', mensaje: 'Otra operación modificó estos datos al mismo tiempo. Intenta de nuevo.' },
     });
@@ -49,7 +49,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
 
   logger.error('Error no controlado', {
-    endpoint: `${req.method} ${req.originalUrl}`,
+    endpoint: endpointParaLog(req),
     usuarioId: req.usuario?.id ?? null,
     error: (err as Error)?.message,
     stack: (err as Error)?.stack,

@@ -2,6 +2,15 @@ import { z, type ZodError, type ZodTypeAny } from 'zod';
 import { AppError, type DetalleError } from '../errors/AppError';
 import { esFechaValida, esHoraValida, normalizarHora } from '../utils/time';
 
+/**
+ * Endpoint para los logs: usa el patrón de la ruta (`/api/enlaces-equipo/:token`), nunca la URL real,
+ * para no escribir tokens ni datos que viajen en la ruta o en la consulta.
+ */
+export function endpointParaLog(req: { method: string; baseUrl: string; originalUrl: string; route?: { path?: unknown } }): string {
+  const patron = typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : req.originalUrl.split('?')[0];
+  return `${req.method} ${patron}`;
+}
+
 /** Traduce los errores de zod a `detalles` por campo. */
 export function detallesDeZod(err: ZodError): DetalleError[] {
   return err.issues.map((i) => ({ campo: i.path.join('.') || 'cuerpo', mensaje: i.message }));
