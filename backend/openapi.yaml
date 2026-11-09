@@ -2,27 +2,3831 @@ openapi: 3.0.3
 info:
   title: CanchaYa API
   version: 0.1.0
+  license:
+    name: MIT
   description: |
     API REST de CanchaYa. Se documenta aquí cada endpoint a medida que se implementa (HT-03, DoD de cada historia).
 
     Autenticación: `Authorization: Bearer <token>` (JWT de 2 horas).
-    Errores: `{ "error": { "codigo", "mensaje", "detalles?" } }` con códigos HTTP 400, 401, 403, 404, 409 y 500.
+    Errores: `{ "error": { "codigo", "mensaje", "detalles?", "datos?" } }` con códigos HTTP 400, 401, 402, 403, 404, 409, 502 y 500.
+    Cualquier endpoint puede responder 409 `CONFLICTO_CONCURRENTE` cuando la base de datos detecta un interbloqueo o un conflicto de serialización; es seguro reintentar la petición.
+
+    Convenciones generales:
+    - Fechas de calendario `YYYY-MM-DD`; horas `HH:MM` (24 h, zona America/Bogota). Como entrada también se acepta `HH:MM:SS`, y `24:00` representa la medianoche de cierre.
+    - Dinero: enteros en pesos colombianos (COP), sin decimales.
+    - Los identificadores son enteros positivos.
+    - Un JSON mal formado responde 400 `JSON_INVALIDO`; un cuerpo mayor de 100 kb responde 413 `CUERPO_DEMASIADO_GRANDE`; una ruta inexistente responde 404 `RUTA_NO_ENCONTRADA`.
+    - Los endpoints con límite de peticiones (HT-13) responden 429 `DEMASIADAS_PETICIONES` e incluyen las cabeceras `RateLimit-Limit`, `RateLimit-Remaining` y `Retry-After`.
+
+    Reservas y pagos (Sprint 2):
+    - Ciclo de vida de una reserva: `pendiente_pago` (retenida 15 minutos, RN-02) -> `confirmada` (abono pagado) -> `pagada` (saldo en cero) -> `completada` o `no_asistio`;
+      también `cancelada` y `expirada`. Solo `pendiente_pago`, `confirmada` y `pagada` ocupan la franja (RN-01).
+    - Un 404 `RESERVA_NO_ENCONTRADA` también se devuelve cuando la reserva existe pero no es del usuario ni de su complejo (no se revela su existencia).
+    - Pasarela de pagos SIMULADA (HT-08): no se cobra dinero real ni se guardan datos de tarjeta. Para probar el rechazo (402 `PAGO_RECHAZADO`):
+      con `metodo: tarjeta`, un `datos.numeroTarjeta` que termine en `0002` se rechaza (cualquier otro número se aprueba);
+      con `pse` o `nequi` (y también con tarjeta), `datos.resultado: "rechazado"` fuerza el rechazo. Sin `datos` el pago se aprueba.
+      Un rechazo queda registrado como pago `rechazado`, la reserva sigue `pendiente_pago` y se puede reintentar mientras dure la retención.
+      Al resolver un reembolso de un pago en línea la pasarela simulada siempre aprueba.
+      En producción la pasarela simulada se niega a arrancar salvo que `PERMITIR_PAGOS_SIMULADOS=true` (solo para entornos de demostración).
 servers:
   - url: http://localhost:3000/api
 tags:
   - name: Auth            # EP-01
+    description: Registro, sesión, recuperación de contraseña y perfil (EP-01, HU-01 a HU-04).
   - name: Complejos       # EP-02
+    description: Complejos, canchas, horarios, tarifas y bloqueos (EP-02, HU-05 a HU-09).
   - name: Reservas        # EP-03
+    description: Disponibilidad, reservas, historial y calendario del complejo (EP-03, HU-10, HU-11, HU-13, HU-14, HT-05).
   - name: Pagos           # EP-04
+    description: Abonos y pagos, cancelaciones, reprogramaciones y reembolsos (EP-04, HU-12, HU-16 a HU-18, HT-08).
+
   - name: Equipos         # EP-05
+    description: Pendiente.
+
   - name: Busca Partido   # EP-06
+    description: Pendiente.
+
   - name: Notificaciones  # EP-07
+    description: Pendiente.
+
   - name: Calificaciones  # EP-08
+    description: Pendiente.
+
   - name: Administración  # EP-09
-paths: {}
+    description: Pendiente.
+
+  - name: Sistema
+    description: Estado del servicio.
+paths:
+  /health:
+    get:
+      operationId: estadoServicio
+      tags: [Sistema]
+      security: []
+      summary: Estado del servicio y de la base de datos
+      description: Comprueba que la API responde y que la base de datos acepta consultas. No requiere sesión.
+      responses:
+        '200':
+          description: Servicio y base de datos operativos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Salud'
+              example: { estado: ok, baseDeDatos: ok }
+        '503':
+          description: La base de datos no responde.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Salud'
+              example: { estado: degradado, baseDeDatos: sin conexión }
+
+  # ------------------------------------------------------------------ Auth (EP-01)
+  /auth/registro:
+    post:
+      operationId: registrarUsuario
+      tags: [Auth]
+      summary: Registrar una cuenta de jugador
+      description: |
+        HU-01. Crea la cuenta con rol `Jugador`, envía el correo de verificación (enlace válido 24 horas) e inicia sesión de inmediato.
+        El correo se normaliza a minúsculas. RNF-03: se exige aceptar el tratamiento de datos (Ley 1581 de 2012).
+        Límite: 20 peticiones por hora por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Registro'
+      responses:
+        '201':
+          description: Cuenta creada. Devuelve la sesión.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '409':
+          description: El correo (`CORREO_EN_USO`) o el nombre de usuario (`USERNAME_EN_USO`) ya existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CORREO_EN_USO, mensaje: El correo ya está en uso } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/login:
+    post:
+      operationId: iniciarSesion
+      tags: [Auth]
+      summary: Iniciar sesión
+      description: |
+        HU-02 / HT-04. Devuelve un JWT de 2 horas. Tras 5 intentos fallidos seguidos la cuenta se bloquea 15 minutos (403 `CUENTA_BLOQUEADA`).
+        No se revela si el correo existe (siempre 401 `CREDENCIALES_INVALIDAS`).
+        Límite: 10 peticiones por minuto por IP y correo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+      responses:
+        '200':
+          description: Sesión iniciada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sesion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          description: Correo o contraseña incorrectos (`CREDENCIALES_INVALIDAS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CREDENCIALES_INVALIDAS, mensaje: Correo o contraseña incorrectos } }
+        '403':
+          description: Cuenta bloqueada por intentos fallidos (`CUENTA_BLOQUEADA`) o suspendida/desactivada (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CUENTA_BLOQUEADA, mensaje: Tu cuenta está bloqueada por intentos fallidos. Intenta de nuevo en 15 minutos. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/logout:
+    post:
+      operationId: cerrarSesion
+      tags: [Auth]
+      summary: Cerrar sesión
+      description: |
+        HU-02. El JWT no tiene estado en el servidor: cerrar sesión consiste en descartar el token en el cliente.
+        No exige token y siempre responde 204.
+      security: []
+      responses:
+        '204':
+          description: Sesión cerrada (sin contenido).
+
+  /auth/verificar-correo:
+    post:
+      operationId: verificarCorreo
+      tags: [Auth]
+      summary: Confirmar el correo con el enlace recibido
+      description: |
+        HU-01 (criterio 4). Consume el token de verificación enviado por correo (válido 24 horas, de un solo uso).
+        Límite: 10 peticiones por minuto por IP y correo del cuerpo (el cuerpo no lleva correo, así que aplica por IP).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenEnlace'
+      responses:
+        '204':
+          description: Correo verificado.
+        '400':
+          description: Datos inválidos (`VALIDACION`), enlace expirado (`TOKEN_EXPIRADO`) o enlace inválido o ya usado (`TOKEN_INVALIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_EXPIRADO, mensaje: El enlace expiró. Solicita uno nuevo. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/reenviar-verificacion:
+    post:
+      operationId: reenviarVerificacion
+      tags: [Auth]
+      summary: Reenviar el correo de verificación
+      description: |
+        HU-01. Requiere sesión (cualquier rol). Si el correo ya está verificado no hace nada. Sin cuerpo.
+        Límite: 5 peticiones cada 15 minutos por IP.
+      security:
+        - bearer: []
+      responses:
+        '204':
+          description: Solicitud aceptada (sin contenido).
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/recuperar-contrasena:
+    post:
+      operationId: recuperarContrasena
+      tags: [Auth]
+      summary: Solicitar enlace de recuperación de contraseña
+      description: |
+        HU-03 (criterio 1). Envía un enlace válido 30 minutos si el correo existe y la cuenta está activa.
+        La respuesta es siempre la misma para no revelar si el correo está registrado.
+        Límite: 5 peticiones cada 15 minutos por IP y correo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecuperarContrasena'
+      responses:
+        '202':
+          description: Solicitud aceptada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mensaje'
+              example:
+                mensaje: Si el correo está registrado, te enviamos un enlace para restablecer la contraseña. Revisa tu bandeja de entrada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/restablecer-contrasena:
+    post:
+      operationId: restablecerContrasena
+      tags: [Auth]
+      summary: Restablecer la contraseña con el enlace recibido
+      description: |
+        HU-03 (criterio 2). Un enlace vencido (30 minutos) o ya usado se rechaza y se debe solicitar uno nuevo.
+        Límite: 10 peticiones por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestablecerContrasena'
+      responses:
+        '204':
+          description: Contraseña actualizada.
+        '400':
+          description: Datos inválidos (`VALIDACION`), enlace expirado (`TOKEN_EXPIRADO`) o inválido/ya usado (`TOKEN_INVALIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_INVALIDO, mensaje: El enlace no es válido o ya fue usado. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/yo:
+    get:
+      operationId: obtenerMiPerfil
+      tags: [Auth]
+      summary: Obtener mi perfil
+      description: HU-04. Devuelve los datos completos de la cuenta autenticada (cualquier rol).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Perfil del usuario autenticado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usuario]
+                properties:
+                  usuario:
+                    $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: actualizarMiPerfil
+      tags: [Auth]
+      summary: Actualizar mi perfil
+      description: |
+        HU-04. Reemplaza los datos editables del perfil (cualquier rol). `fotoUrl`, `posicionPreferida` y `nivel` son obligatorios en el cuerpo pero admiten `null`.
+        El correo, el nombre de usuario y la fecha de nacimiento no se pueden cambiar.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Perfil'
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usuario]
+                properties:
+                  usuario:
+                    $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /auth/yo/contrasena:
+    put:
+      operationId: cambiarContrasena
+      tags: [Auth]
+      summary: Cambiar mi contraseña
+      description: |
+        HU-03 / HU-04. Requiere la contraseña actual. Cualquier rol. Límite: 10 peticiones por minuto por IP.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioContrasena'
+      responses:
+        '204':
+          description: Contraseña cambiada.
+        '400':
+          description: Datos inválidos (`VALIDACION`) o contraseña actual incorrecta (`CONTRASENA_ACTUAL_INCORRECTA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CONTRASENA_ACTUAL_INCORRECTA, mensaje: La contraseña actual no es correcta } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /usuarios/{username}:
+    get:
+      operationId: obtenerPerfilPublico
+      tags: [Auth]
+      summary: Ver el perfil público de un jugador
+      description: |
+        HU-04 (criterio 2). Público, sin sesión. Nunca expone correo ni celular.
+        Un usuario desactivado responde 404. `partidosJugados`, `fairPlay` y `equipos` los completan otros módulos (por ahora 0, null y []).
+        Un `username` con formato inválido responde 400 `VALIDACION`.
+      security: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          description: Nombre de usuario (3 a 30 caracteres).
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 30
+            pattern: '^[a-zA-Z0-9_.]+$'
+          example: juan.perez
+      responses:
+        '200':
+          description: Perfil público.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [perfil]
+                properties:
+                  perfil:
+                    $ref: '#/components/schemas/PerfilPublico'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          description: El jugador no existe (`USUARIO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: USUARIO_NO_ENCONTRADO, mensaje: El jugador no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  # ------------------------------------------------------------------ Complejos (EP-02)
+  /servicios:
+    get:
+      operationId: listarServicios
+      tags: [Complejos]
+      summary: Catálogo de servicios de un complejo
+      description: HU-05. Lista los servicios que un complejo puede ofrecer (parqueadero, cafetería, etc.). Público.
+      security: []
+      responses:
+        '200':
+          description: Catálogo de servicios.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servicios]
+                properties:
+                  servicios:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Servicio'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos:
+    get:
+      operationId: buscarComplejos
+      tags: [Complejos]
+      summary: Buscar complejos activos
+      description: |
+        HU-05 (criterio 2) / HU-06. Público. Solo devuelve complejos en estado `activo`, ordenados por nombre.
+        `q` busca por nombre o barrio (sin distinguir mayúsculas); `ciudad` es una coincidencia exacta sin distinguir mayúsculas.
+      security: []
+      parameters:
+        - name: ciudad
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+          example: Bogotá
+        - name: q
+          in: query
+          description: Texto a buscar en nombre o barrio.
+          schema:
+            type: string
+            maxLength: 80
+        - name: tipoFutbol
+          in: query
+          description: Solo complejos con al menos una cancha activa de este tipo.
+          schema:
+            $ref: '#/components/schemas/TipoFutbol'
+        - name: servicio
+          in: query
+          description: Id de un servicio que el complejo debe ofrecer.
+          schema:
+            type: integer
+            minimum: 1
+        - name: pagina
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: tamano
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+      responses:
+        '200':
+          description: Página de resultados.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [complejos, total, pagina, tamano]
+                properties:
+                  complejos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ComplejoResumen'
+                  total:
+                    type: integer
+                    description: Total de complejos que cumplen los filtros.
+                  pagina:
+                    type: integer
+                  tamano:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearComplejo
+      tags: [Complejos]
+      summary: Registrar un complejo
+      description: |
+        HU-05 (criterio 1). Cualquier usuario autenticado puede registrar un complejo; el solicitante pasa a rol `AdminComplejo`.
+        El complejo queda en estado `pendiente` hasta que un Superadmin lo apruebe. Genera el evento `ComplejoRegistrado`.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplejoInput'
+      responses:
+        '201':
+          description: Complejo creado (estado `pendiente`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /mis-complejos:
+    get:
+      operationId: listarMisComplejos
+      tags: [Complejos]
+      summary: Listar mis complejos
+      description: |
+        HU-05. Roles: `AdminComplejo` o `Superadmin`. Devuelve los complejos administrados por el usuario en cualquier estado
+        (máximo 50, sin paginación).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Complejos del administrador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejosResumenLista'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/pendientes:
+    get:
+      operationId: listarComplejosPendientes
+      tags: [Complejos]
+      summary: Listar complejos pendientes de aprobación
+      description: |
+        HU-05 / HU-33. Rol: `Superadmin`. Complejos en estado `pendiente` (máximo 50, sin paginación).
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Complejos pendientes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejosResumenLista'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      operationId: obtenerComplejo
+      tags: [Complejos]
+      summary: Detalle de un complejo
+      description: |
+        HU-05 / HU-06 / HU-07. Público (la sesión es opcional). Incluye canchas, horarios y servicios.
+        Un complejo que no está `activo` solo lo ve su administrador o un Superadmin; para el resto responde 404.
+        El público solo ve canchas activas y fechas especiales vigentes (hoy o futuras); `esGestor` indica si quien consulta es el dueño o Superadmin.
+        Un token inválido o vencido se trata como visitante (no responde 401).
+      security:
+        - {}
+        - bearer: []
+      responses:
+        '200':
+          description: Detalle del complejo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoDetalle'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: actualizarComplejo
+      tags: [Complejos]
+      summary: Actualizar un complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (solo el dueño del complejo) o `Superadmin`. Reemplaza todos los datos y los servicios (`servicioIds`).
+        Un complejo `rechazado` que se corrige vuelve a `pendiente`.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplejoInput'
+      responses:
+        '200':
+          description: Complejo actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/servicios:
+    put:
+      operationId: reemplazarServiciosComplejo
+      tags: [Complejos]
+      summary: Reemplazar los servicios de un complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`. Sustituye la lista completa de servicios.
+        Un id de servicio inexistente responde 400 `VALIDACION` (campo `servicioIds`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiciosInput'
+      responses:
+        '200':
+          description: Complejo con sus servicios actualizados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/fotos:
+    post:
+      operationId: agregarFotoComplejo
+      tags: [Complejos]
+      summary: Agregar una foto al complejo
+      description: |
+        HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`. La URL debe ser https. Máximo 10 fotos por complejo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FotoInput'
+      responses:
+        '201':
+          description: Foto agregada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [foto]
+                properties:
+                  foto:
+                    $ref: '#/components/schemas/Foto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          description: Se alcanzó el máximo de 10 fotos (`MAXIMO_FOTOS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MAXIMO_FOTOS, mensaje: Un complejo puede tener máximo 10 fotos } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/fotos/{fotoId}:
+    delete:
+      operationId: eliminarFotoComplejo
+      tags: [Complejos]
+      summary: Eliminar una foto del complejo
+      description: 'HU-05. Roles: `AdminComplejo` (dueño) o `Superadmin`.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fotoId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: Foto eliminada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El complejo (`COMPLEJO_NO_ENCONTRADO`) o la foto (`FOTO_NO_ENCONTRADA`) no existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FOTO_NO_ENCONTRADA, mensaje: La foto no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/aprobacion:
+    patch:
+      operationId: resolverAprobacionComplejo
+      tags: [Complejos]
+      summary: Aprobar o rechazar un complejo
+      description: |
+        HU-33 (criterio 1) / HU-05 (criterio 2). Rol: `Superadmin`. Solo aplica a complejos `pendiente`.
+        Para rechazar (`aprobar: false`) el `motivo` es obligatorio. Genera los eventos `ComplejoAprobado` o `ComplejoRechazado`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Aprobacion'
+            examples:
+              aprobar:
+                value: { aprobar: true }
+              rechazar:
+                value: { aprobar: false, motivo: Faltan fotos de las canchas }
+      responses:
+        '200':
+          description: Complejo con su nuevo estado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplejoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          description: El complejo ya fue aprobado o rechazado (`COMPLEJO_YA_RESUELTO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: COMPLEJO_YA_RESUELTO, mensaje: El complejo ya fue aprobado o rechazado } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/canchas:
+    post:
+      operationId: crearCancha
+      tags: [Complejos]
+      summary: Crear una cancha en un complejo
+      description: |
+        HU-06. Roles: `AdminComplejo` (dueño) o `Superadmin`. Si no se envía `capacidadJugadores` se usa `tipoFutbol * 2`.
+        El nombre debe ser único dentro del complejo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaInput'
+      responses:
+        '201':
+          description: Cancha creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/CanchaDuplicada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}:
+    put:
+      operationId: actualizarCancha
+      tags: [Complejos]
+      summary: Actualizar una cancha
+      description: |
+        HU-06 (criterio 3). Roles: `AdminComplejo` (dueño del complejo de la cancha) o `Superadmin`.
+        Reemplaza todos los datos. Desactivar (`estado: inactiva`) conserva el historial: las canchas nunca se borran.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaInput'
+      responses:
+        '200':
+          description: Cancha actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/CanchaDuplicada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios:
+    get:
+      operationId: listarHorarios
+      tags: [Complejos]
+      summary: Listar los horarios de un complejo
+      description: |
+        HU-07. Roles: `AdminComplejo` (dueño) o `Superadmin`. Devuelve el horario habitual (por día de semana) y las fechas especiales.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Horarios del complejo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [horarios]
+                properties:
+                  horarios:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Horario'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: guardarHorarioHabitual
+      tags: [Complejos]
+      summary: Reemplazar el horario habitual
+      description: |
+        HU-07 (criterios 1 y 3). Roles: `AdminComplejo` (dueño) o `Superadmin`. Reemplaza el horario semanal; los días que no se envíen quedan cerrados.
+        Cada día puede aparecer una sola vez. La hora de cierre debe ser posterior a la de apertura y alcanzar al menos un turno completo.
+        Si quedan reservas activas fuera del nuevo horario no se eliminan: se devuelven en `advertencias.reservasFueraDeHorario`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HorarioHabitualInput'
+      responses:
+        '200':
+          description: Horarios guardados, con advertencias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HorariosGuardados'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios-especiales:
+    post:
+      operationId: guardarHorarioEspecial
+      tags: [Complejos]
+      summary: Definir un horario especial para una fecha
+      description: |
+        HU-07 (criterio 2). Roles: `AdminComplejo` (dueño) o `Superadmin`. El horario especial reemplaza al habitual solo ese día.
+        La fecha no puede estar en el pasado. Si ya existe uno para la fecha se reemplaza.
+        Devuelve advertencias si quedan reservas fuera del horario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HorarioEspecialInput'
+      responses:
+        '200':
+          description: Horarios guardados, con advertencias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HorariosGuardados'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/horarios-especiales/{fecha}:
+    delete:
+      operationId: eliminarHorarioEspecial
+      tags: [Complejos]
+      summary: Eliminar el horario especial de una fecha
+      description: 'HU-07. Roles: `AdminComplejo` (dueño) o `Superadmin`. La fecha vuelve a regirse por el horario habitual.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-24'
+      responses:
+        '204':
+          description: Horario especial eliminado.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El complejo (`COMPLEJO_NO_ENCONTRADO`) no existe o no hay horario especial en esa fecha (`HORARIO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: HORARIO_NO_ENCONTRADO, mensaje: No hay un horario especial en esa fecha } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/tarifas:
+    get:
+      operationId: listarTarifas
+      tags: [Complejos]
+      summary: Listar las tarifas activas de una cancha
+      description: |
+        HU-08. Público (la sesión es opcional). Solo tarifas activas, ordenadas por tipo de día y hora de inicio.
+        Una cancha inactiva o de un complejo no activo solo la ve su administrador o un Superadmin; para el resto responde 404.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Tarifas de la cancha.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tarifas]
+                properties:
+                  tarifas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tarifa'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearTarifa
+      tags: [Complejos]
+      summary: Crear una tarifa para una cancha
+      description: |
+        HU-08. Roles: `AdminComplejo` (dueño) o `Superadmin`. `horaFin` debe ser posterior a `horaInicio`.
+        No puede cruzarse con otra tarifa activa del mismo tipo de día (409 `TARIFA_CRUZADA`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TarifaInput'
+      responses:
+        '201':
+          description: Tarifa creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TarifaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/TarifaCruzada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/franjas:
+    get:
+      operationId: listarFranjas
+      tags: [Complejos]
+      summary: Franjas horarias de una cancha en una fecha
+      description: |
+        HU-07 a HU-09. Público (la sesión es opcional). Calcula las franjas del día según el horario (especial o habitual), la tarifa vigente y los bloqueos.
+        Estados: `libre`, `bloqueada`, `pasada` (ya transcurrió, hora de Bogotá) o `sin_tarifa` (precio `null`).
+        Es la vista de configuración del complejo: **no** marca las franjas reservadas. Para ver la disponibilidad real
+        (incluye `reservada` y `partido_abierto`) usar `GET /complejos/{id}/disponibilidad` (HU-10.2).
+        Una cancha inactiva o de un complejo no activo solo la ve su administrador o un Superadmin.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-05'
+      responses:
+        '200':
+          description: Cancha y franjas del día (vacías si el complejo no abre ese día).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FranjasDia'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /tarifas/{id}:
+    put:
+      operationId: actualizarTarifa
+      tags: [Complejos]
+      summary: Modificar una tarifa
+      description: |
+        HU-08 (criterio 3) / RN-04. Roles: `AdminComplejo` (dueño) o `Superadmin`.
+        No edita la tarifa: crea una nueva y desactiva la anterior (las reservas ya hechas conservan su precio). El `id` devuelto es el de la tarifa nueva.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TarifaInput'
+      responses:
+        '200':
+          description: Nueva tarifa vigente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TarifaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/TarifaNoEncontrada'
+        '409':
+          $ref: '#/components/responses/TarifaCruzada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    delete:
+      operationId: eliminarTarifa
+      tags: [Complejos]
+      summary: Eliminar (desactivar) una tarifa
+      description: 'HU-08 / RN-04. Roles: `AdminComplejo` (dueño) o `Superadmin`. Es una baja lógica; las reservas existentes no cambian.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Tarifa desactivada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/TarifaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /canchas/{id}/bloqueos:
+    get:
+      operationId: listarBloqueos
+      tags: [Complejos]
+      summary: Listar los bloqueos de una cancha
+      description: |
+        HU-09. Roles: `AdminComplejo` (dueño) o `Superadmin`. Por defecto lista desde hoy hasta 60 días después; `desde` y `hasta` (inclusive) cambian el rango.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: desde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: hasta
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Bloqueos del rango.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bloqueos]
+                properties:
+                  bloqueos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Bloqueo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearBloqueo
+      tags: [Complejos]
+      summary: Bloquear una cancha por mantenimiento
+      description: |
+        HU-09. Roles: `AdminComplejo` (dueño) o `Superadmin`. Fecha y hora locales de Bogotá. `fechaFin` debe ser posterior a `fechaInicio` y no estar en el pasado.
+        HU-09 (criterio 2): si hay reservas activas en el rango no se bloquea y responde 409 `BLOQUEO_CON_RESERVAS` con las reservas en `datos.reservas`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BloqueoInput'
+      responses:
+        '201':
+          description: Bloqueo creado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bloqueo]
+                properties:
+                  bloqueo:
+                    $ref: '#/components/schemas/Bloqueo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          description: Hay reservas activas en el rango (`BLOQUEO_CON_RESERVAS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: BLOQUEO_CON_RESERVAS
+                  mensaje: Hay reservas en ese rango. Reprográmalas o cancélalas antes de bloquear.
+                  datos:
+                    reservas:
+                      - { id: 12, codigo: CY-000012, canchaId: 3, fecha: '2026-12-05', horaInicio: '18:00', horaFin: '19:00' }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /bloqueos/{id}:
+    delete:
+      operationId: eliminarBloqueo
+      tags: [Complejos]
+      summary: Eliminar un bloqueo
+      description: 'HU-09. Roles: `AdminComplejo` (dueño de la cancha) o `Superadmin`. Libera las franjas bloqueadas.'
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Bloqueo eliminado.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El bloqueo (`BLOQUEO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: BLOQUEO_NO_ENCONTRADO, mensaje: El bloqueo no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  # ------------------------------------------------------------------ Reservas (EP-03)
+  /disponibilidad:
+    get:
+      operationId: buscarDisponibilidad
+      tags: [Reservas]
+      summary: Buscar canchas disponibles en una fecha
+      description: |
+        HU-10 (criterios 1 y 3). Público, sin sesión. Devuelve los complejos activos con canchas que tienen al menos una franja `libre`
+        en la fecha (y en el rango `horaDesde` inclusive a `horaHasta` exclusivo, que filtra por hora de inicio), con las franjas libres y el precio mínimo (`precioDesde`).
+        Orden: por distancia si se envían `lat` y `lng`; si no, por `precioDesde` ascendente. `distanciaKm` solo viene con coordenadas.
+        Si no hay resultados y se envió `horaDesde`, `sugerencias` trae hasta 6 franjas libres de ese día, las más cercanas a esa hora.
+        `lat` y `lng` deben enviarse juntas; `horaHasta` debe ser posterior a `horaDesde`.
+        `limitado` es `true` cuando hay más canchas que las revisadas y el resultado puede estar incompleto (conviene filtrar por ciudad o tipo de fútbol).
+      security:
+        - {}
+      parameters:
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-05'
+        - name: ciudad
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+        - name: barrio
+          in: query
+          schema:
+            type: string
+            maxLength: 80
+        - name: tipoFutbol
+          in: query
+          schema:
+            $ref: '#/components/schemas/TipoFutbol'
+        - name: horaDesde
+          in: query
+          schema:
+            $ref: '#/components/schemas/Hora'
+        - name: horaHasta
+          in: query
+          schema:
+            $ref: '#/components/schemas/Hora'
+        - name: lat
+          in: query
+          description: Latitud del usuario (requiere `lng`).
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+        - name: lng
+          in: query
+          description: Longitud del usuario (requiere `lat`).
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+      responses:
+        '200':
+          description: Resultados agrupados por complejo, y sugerencias cuando no hay resultados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusquedaDisponibilidad'
+              example:
+                fecha: '2026-12-05'
+                resultados:
+                  - complejo: { id: 1, nombre: Complejo El Golazo, ciudad: Bogotá, barrio: Chicó, direccion: 'Calle 100 # 15-20', fotoPrincipal: null, distanciaKm: 2.4 }
+                    canchas:
+                      - id: 3
+                        nombre: Cancha 1
+                        tipoFutbol: 5
+                        techada: false
+                        iluminacion: true
+                        franjas:
+                          - { horaInicio: '18:00', horaFin: '19:00', precio: 80000, estado: libre }
+                    precioDesde: 80000
+                sugerencias: []
+                limitado: false
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '409':
+          $ref: '#/components/responses/ConflictoConcurrente'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/disponibilidad:
+    get:
+      operationId: disponibilidadComplejo
+      tags: [Reservas]
+      summary: Grilla de disponibilidad de un complejo por cancha
+      description: |
+        HU-10 (criterio 2). Público, sin sesión. Para cada cancha activa del complejo devuelve todas las franjas del día con su estado:
+        `libre`, `reservada` (reserva activa, RN-01), `partido_abierto` (reserva con un partido de Busca Partido con cupos), `bloqueada`, `pasada` o `sin_tarifa`.
+        Un complejo que no está `activo` o no existe responde 404.
+      security:
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-05'
+      responses:
+        '200':
+          description: Canchas del complejo con sus franjas del día.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisponibilidadComplejo'
+              example:
+                fecha: '2026-12-05'
+                canchas:
+                  - id: 3
+                    nombre: Cancha 1
+                    tipoFutbol: 5
+                    franjas:
+                      - { horaInicio: '18:00', horaFin: '19:00', precio: 80000, estado: reservada }
+                      - { horaInicio: '19:00', horaFin: '20:00', precio: 80000, estado: libre }
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas:
+    post:
+      operationId: crearReserva
+      tags: [Reservas]
+      summary: Reservar una franja (queda pendiente de pago)
+      description: |
+        HU-11 / HT-05 / RN-01, RN-02, RN-03, RN-04, RN-06. Cualquier usuario autenticado con el correo verificado.
+        Crea una reserva `pendiente_pago` retenida 15 minutos (`fechaExpiracion`); si no se paga el abono, expira y libera la franja (RN-02).
+        El precio queda fijo con la tarifa vigente (RN-04) y el abono es el porcentaje del complejo (RN-03).
+        La franja debe ser una del horario del día, futura, dentro de los días de anticipación permitidos, sin bloqueo y con tarifa (RN-06).
+        Máximo 3 reservas sin pagar por jugador (409 `DEMASIADAS_PENDIENTES`); el límite se aplica de forma atómica por usuario, así que peticiones simultáneas no lo superan. Si dos personas reservan a la vez, la segunda recibe 409 `FRANJA_NO_DISPONIBLE` (HT-05).
+        Errores 400 de franja: `FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`. Errores 409 de franja: `FRANJA_BLOQUEADA`, `SIN_TARIFA`.
+        Límite: 10 peticiones por minuto por usuario.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearReservaInput'
+      responses:
+        '201':
+          description: Reserva creada, pendiente de pago.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaEnvuelta'
+              example:
+                reserva:
+                  id: 12
+                  codigo: CY-000012
+                  usuarioId: 7
+                  canchaId: 3
+                  cancha: { nombre: Cancha 1, tipoFutbol: 5 }
+                  complejo: { id: 1, nombre: Complejo El Golazo, direccion: 'Calle 100 # 15-20', ciudad: Bogotá, barrio: Chicó }
+                  fecha: '2026-12-05'
+                  horaInicio: '18:00'
+                  horaFin: '19:00'
+                  precioTotal: 80000
+                  abonoRequerido: 40000
+                  saldoPendiente: 80000
+                  totalPagado: 0
+                  estado: pendiente_pago
+                  origen: web
+                  nombreClienteManual: null
+                  celularClienteManual: null
+                  reprogramadaDeId: null
+                  motivoCancelacion: null
+                  fechaCreacion: '2026-11-07T15:04:05.000Z'
+                  fechaExpiracion: '2026-11-07T15:19:05.000Z'
+                  fechaCancelacion: null
+                  segundosParaPagar: 900
+        '400':
+          description: |
+            Datos inválidos (`VALIDACION`) o franja no reservable: `FECHA_PASADA`, `FUERA_DE_ANTICIPACION` o `FUERA_DE_HORARIO`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FECHA_PASADA, mensaje: Esa franja ya empezó o está en el pasado. } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: El correo no está verificado (`CORREO_NO_VERIFICADO`) o la cuenta está suspendida/desactivada (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CORREO_NO_VERIFICADO, mensaje: Confirma tu correo antes de reservar. } }
+        '404':
+          $ref: '#/components/responses/CanchaNoEncontrada'
+        '409':
+          description: |
+            `FRANJA_NO_DISPONIBLE` (ya reservada), `FRANJA_BLOQUEADA`, `SIN_TARIFA` o `DEMASIADAS_PENDIENTES` (3 reservas sin pagar).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FRANJA_NO_DISPONIBLE, mensaje: La franja ya no está disponible } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /mis-reservas:
+    get:
+      operationId: listarMisReservas
+      tags: [Reservas]
+      summary: Listar mis reservas (próximas o historial)
+      description: |
+        HU-13. Cualquier usuario autenticado. `vista=proximas` (por defecto) trae las reservas activas que aún no terminan;
+        `vista=historial` trae las pasadas o ya cerradas (canceladas, expiradas, completadas, no asistió). Sin paginación.
+      security:
+        - bearer: []
+      parameters:
+        - name: vista
+          in: query
+          schema:
+            type: string
+            enum: [proximas, historial]
+            default: proximas
+      responses:
+        '200':
+          description: Reservas del usuario.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reservas]
+                properties:
+                  reservas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Reserva'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}:
+    get:
+      operationId: obtenerReserva
+      tags: [Reservas]
+      summary: Detalle de una reserva
+      description: |
+        HU-11 / HU-13. Roles: el jugador dueño de la reserva, el `AdminComplejo` del complejo o `Superadmin`.
+        Para cualquier otro usuario responde 404 (no se revela que existe).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: La reserva.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/reservas:
+    get:
+      operationId: calendarioComplejo
+      tags: [Reservas]
+      summary: Calendario de reservas del complejo en una fecha
+      description: |
+        HU-14 (criterio 1). Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. Devuelve todas las canchas (también las inactivas)
+        y todas las reservas del día, para pintar el calendario con las canchas en columnas. Cada reserva incluye `nombreJugador` (nombre del jugador de la web, `null` en reservas manuales).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-12-05'
+      responses:
+        '200':
+          description: Canchas y reservas del día.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarioComplejo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/reservas-manuales:
+    post:
+      operationId: crearReservaManual
+      tags: [Reservas]
+      summary: Registrar una reserva manual (teléfono o en persona)
+      description: |
+        HU-14 (criterio 2) / HT-05. Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. La reserva nace `confirmada` (sin retención),
+        con `origen: manual`, sin usuario y con los datos del cliente; ocupa la franja para todos (RN-01). Aplican las mismas reglas de franja que `POST /reservas` (RN-06).
+        La cancha debe pertenecer al complejo (si no, 404 `CANCHA_NO_ENCONTRADA`). El pago se registra luego con `POST /reservas/{id}/pagos`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservaManualInput'
+      responses:
+        '201':
+          description: Reserva manual creada (`confirmada`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaEnvuelta'
+        '400':
+          description: Datos inválidos (`VALIDACION`) o franja no reservable (`FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FUERA_DE_HORARIO, mensaje: Esa franja no está dentro del horario de atención de la cancha. } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El complejo (`COMPLEJO_NO_ENCONTRADO`) o la cancha (`CANCHA_NO_ENCONTRADA`, no es del complejo o no está disponible) no existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CANCHA_NO_ENCONTRADA, mensaje: La cancha no pertenece a este complejo } }
+        '409':
+          description: La franja está ocupada (`FRANJA_NO_DISPONIBLE`), bloqueada (`FRANJA_BLOQUEADA`) o sin tarifa (`SIN_TARIFA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FRANJA_NO_DISPONIBLE, mensaje: La franja ya no está disponible } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}/estado:
+    patch:
+      operationId: cambiarEstadoReserva
+      tags: [Reservas]
+      summary: Marcar una reserva como completada o no asistió
+      description: |
+        HU-14 (criterios 3 y 4) / RN-07. Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. Solo reservas `confirmada` o `pagada`
+        y solo cuando el partido ya empezó. `no_asistio` no genera reembolso (RN-07) y queda en el historial del jugador.
+        Una reserva ajena responde 404 `RESERVA_NO_ENCONTRADA`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioEstadoInput'
+      responses:
+        '200':
+          description: Reserva con su nuevo estado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '409':
+          description: La reserva no está confirmada ni pagada (`ESTADO_INVALIDO`) o el partido aún no empezó (`PARTIDO_NO_INICIADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_NO_INICIADO, mensaje: Solo puedes marcar la reserva cuando el partido ya empezó. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  # ------------------------------------------------------------------ Pagos (EP-04)
+  /reservas/{id}/pagos/abono:
+    post:
+      operationId: pagarAbonoEnLinea
+      tags: [Pagos]
+      summary: Pagar el abono en línea (pasarela simulada)
+      description: |
+        HU-16 / HT-08 / RN-02, RN-03. Rol: el jugador dueño de la reserva (si no es suya, 404). La reserva debe estar `pendiente_pago` y dentro de su retención de 15 minutos.
+        Es un proceso en dos fases: primero se registra el pago `pendiente` (en una transacción que valida la reserva y la retención), luego se cobra a la pasarela
+        fuera de la transacción y por último se resuelve el pago (`aprobado` o `rechazado`). Mientras haya un pago pendiente de la reserva, otro intento responde 409 `PAGO_EN_CURSO`.
+        `valor` es opcional: por defecto lo que falta para cubrir el abono (`abonoRequerido - totalPagado`, sin pasar del saldo pendiente). Regla: `totalPagado + valor >= abonoRequerido` y `valor <= saldoPendiente`.
+        Aprobado: queda `confirmada` (o `pagada` si cubre el total), se registra el pago (201) y se envía el comprobante por correo.
+        Si la reserva expiró o dejó de estar pendiente mientras se cobraba, el cobro se reembolsa automáticamente al 100 % y responde 409 `RESERVA_EXPIRADA`.
+        Si la pasarela no responde, responde 502 `PASARELA_NO_DISPONIBLE`.
+        Rechazado: el intento queda registrado como pago `rechazado`, la reserva sigue `pendiente_pago` y responde 402 `PAGO_RECHAZADO` con el pago en `error.datos.pago`; se puede reintentar.
+        Pasarela simulada: tarjeta con `datos.numeroTarjeta` terminada en `0002` se rechaza; `datos.resultado: "rechazado"` rechaza cualquier método; en otro caso se aprueba.
+        Límite: 10 peticiones cada 10 minutos por usuario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PagoEnLineaInput'
+            examples:
+              tarjetaAprobada:
+                summary: Tarjeta aprobada
+                value: { metodo: tarjeta, datos: { numeroTarjeta: '4111 1111 1111 1111' } }
+              tarjetaRechazada:
+                summary: Tarjeta rechazada (termina en 0002)
+                value: { metodo: tarjeta, datos: { numeroTarjeta: '4111 1111 1111 0002' } }
+              nequiRechazado:
+                summary: Nequi rechazado
+                value: { metodo: nequi, datos: { resultado: rechazado } }
+      responses:
+        '201':
+          description: Pago aprobado y reserva actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoYReserva'
+              example:
+                pago: { id: 31, reservaId: 12, usuarioId: 7, equipoId: null, valor: 40000, tipo: abono, metodo: tarjeta, referencia: SIM-3f2b8c1e-5a0d-4c6e-9d7a-2b1f0e9a8c77, estado: aprobado, fecha: '2026-11-07T15:06:00.000Z' }
+                reserva:
+                  id: 12
+                  codigo: CY-000012
+                  usuarioId: 7
+                  canchaId: 3
+                  cancha: { nombre: Cancha 1, tipoFutbol: 5 }
+                  complejo: { id: 1, nombre: Complejo El Golazo, direccion: 'Calle 100 # 15-20', ciudad: Bogotá, barrio: Chicó }
+                  fecha: '2026-12-05'
+                  horaInicio: '18:00'
+                  horaFin: '19:00'
+                  precioTotal: 80000
+                  abonoRequerido: 40000
+                  saldoPendiente: 40000
+                  totalPagado: 40000
+                  estado: confirmada
+                  origen: web
+                  nombreClienteManual: null
+                  celularClienteManual: null
+                  reprogramadaDeId: null
+                  motivoCancelacion: null
+                  fechaCreacion: '2026-11-07T15:04:05.000Z'
+                  fechaExpiracion: '2026-11-07T15:19:05.000Z'
+                  fechaCancelacion: null
+                  segundosParaPagar: 0
+        '400':
+          description: |
+            Datos inválidos (`VALIDACION`), incluido un `valor` que no cubre lo que falta del abono o que supera el saldo pendiente (campo `valor`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: VALIDACION
+                  mensaje: Revisa los datos ingresados.
+                  detalles:
+                    - { campo: valor, mensaje: El abono mínimo es de 40000 pesos. }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '402':
+          description: |
+            Pago rechazado por la pasarela (`PAGO_RECHAZADO`). El intento queda registrado y la reserva sigue `pendiente_pago`;
+            el pago rechazado viene en `error.datos.pago`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: PAGO_RECHAZADO
+                  mensaje: El pago fue rechazado. Tu reserva sigue apartada, puedes intentar de nuevo con otro medio.
+                  datos:
+                    pago: { id: 30, reservaId: 12, usuarioId: 7, equipoId: null, valor: 40000, tipo: abono, metodo: tarjeta, referencia: SIM-9a1c0d2e-77b4-4f1e-8c3a-5d6e7f8a9b0c, estado: rechazado, fecha: '2026-11-07T15:05:00.000Z' }
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '409':
+          description: |
+            La reserva ya no está pendiente de pago (`RESERVA_NO_PENDIENTE`), venció la retención (`RESERVA_EXPIRADA`; también puede ocurrir después de cobrar, y en ese caso el cobro se reembolsa
+            al 100 % automáticamente), ya hay un pago en curso de esta reserva (`PAGO_EN_CURSO`) o `CONFLICTO_CONCURRENTE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_EXPIRADA, mensaje: El tiempo para pagar venció y la franja se liberó. Haz una nueva reserva. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '502':
+          description: La pasarela de pagos no está disponible (`PASARELA_NO_DISPONIBLE`). La reserva no se confirma.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PASARELA_NO_DISPONIBLE, mensaje: La pasarela de pagos no está disponible. Intenta de nuevo en unos minutos. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}/pagos:
+    get:
+      operationId: listarPagosDeReserva
+      tags: [Pagos]
+      summary: Pagos y reembolsos de una reserva
+      description: |
+        HU-16 / HU-17. Roles: el jugador dueño de la reserva, el `AdminComplejo` del complejo o `Superadmin` (para otros, 404).
+        Incluye los pagos de todos los estados (también los rechazados), los reembolsos y un resumen de saldos.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Pagos, reembolsos y resumen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagosDeReserva'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: registrarPagoManual
+      tags: [Pagos]
+      summary: Registrar un pago en efectivo o transferencia
+      description: |
+        HU-17. Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. La reserva debe estar `pendiente_pago` o `confirmada`.
+        `tipo` es `saldo` por defecto. Si no se envía `valor`: con `saldo`, todo el saldo pendiente; con `abono`, el abono requerido (sin pasar del saldo).
+        El valor no puede superar el saldo pendiente. El pago queda `aprobado`; sobre una reserva `pendiente_pago` siempre la confirma (el dinero se recibió en el complejo, aunque no cubra el abono) y al cubrir el total pasa a `pagada`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PagoManualInput'
+      responses:
+        '201':
+          description: Pago registrado y reserva actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoYReserva'
+        '400':
+          description: Datos inválidos (`VALIDACION`), incluido un `valor` que supera el saldo pendiente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: VALIDACION
+                  mensaje: Revisa los datos ingresados.
+                  detalles:
+                    - { campo: valor, mensaje: El valor supera el saldo pendiente de la reserva. }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '409':
+          description: La reserva ya está pagada o no admite pagos (`ESTADO_INVALIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: ESTADO_INVALIDO, mensaje: La reserva ya está pagada. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}/cancelacion:
+    get:
+      operationId: previsualizarCancelacion
+      tags: [Pagos]
+      summary: Calcular el reembolso si se cancela ahora
+      description: |
+        HU-12 / RN-05. Roles: el jugador dueño, el `AdminComplejo` del complejo o `Superadmin` (para otros, 404). No modifica nada.
+        Política para el jugador: más de 24 h de anticipación, 100 % de lo pagado; entre 6 y 24 h (inclusive), 50 %; menos de 6 h, 0 %
+        (porcentajes configurables en los parámetros globales). Si quien consulta no es el dueño (cancela el complejo), el porcentaje es 100 %.
+        `puedeReprogramar` solo es verdadero para el dueño, con reserva `confirmada` o `pagada` y más de 24 h de anticipación.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Vista previa de la cancelación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewCancelacion'
+              example: { horasDeAnticipacion: 30.5, porcentajeReembolso: 100, totalPagado: 40000, valorReembolso: 40000, puedeReprogramar: true }
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}/cancelar:
+    post:
+      operationId: cancelarReserva
+      tags: [Pagos]
+      summary: Cancelar una reserva
+      description: |
+        HU-12 (criterios 1 y 2) / RN-05, RN-07. Roles: el jugador dueño, o el `AdminComplejo` del complejo / `Superadmin` (cancelación por el complejo).
+        Solo reservas activas (`pendiente_pago`, `confirmada`, `pagada`) cuyo partido no ha empezado. La franja se libera y, según la anticipación,
+        se crean reembolsos `pendiente` por cada pago aprobado (HU-18 los resuelve). RN-05 se aplica a lo que aún se puede reembolsar de cada pago (un pago puede tener varios reembolsos; su suma nunca supera el valor del pago).
+        Si cancela el complejo, el reembolso es del 100 % y el `motivo` es obligatorio; un `Superadmin` que cancela cuenta como cancelación del complejo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelacionInput'
+      responses:
+        '200':
+          description: Reserva cancelada y reembolso generado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoCancelacion'
+        '400':
+          description: Datos inválidos (`VALIDACION`), p. ej. falta el `motivo` cuando cancela el complejo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: VALIDACION
+                  mensaje: Revisa los datos ingresados.
+                  detalles:
+                    - { campo: motivo, mensaje: Indica el motivo de la cancelación para el cliente }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '409':
+          description: La reserva ya no se puede cancelar (`ESTADO_INVALIDO`) o el partido ya empezó (`PARTIDO_INICIADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_INICIADO, mensaje: El partido ya empezó; no se puede cancelar. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reservas/{id}/reprogramar:
+    post:
+      operationId: reprogramarReserva
+      tags: [Pagos]
+      summary: Reprogramar una reserva a otra franja
+      description: |
+        HU-12 (criterio 3) / RN-04, RN-06. Rol: solo el jugador dueño (otro usuario recibe 404). La reserva debe estar `confirmada` o `pagada` y faltar más de 24 horas. La reserva nueva siempre queda `confirmada` o `pagada`.
+        Cancela la original (motivo `Reprogramada`) y crea una nueva en la franja pedida (mismo complejo; `canchaId` opcional, por defecto la misma cancha) con el precio vigente,
+        trasladando lo ya pagado sin costo. Si lo pagado supera el nuevo precio, el excedente se reembolsa repartido entre los pagos, del más reciente al más antiguo (`excedenteReembolsado` es lo realmente reembolsado). Todo ocurre en una transacción:
+        si la franja nueva falla, la original queda intacta. La nueva franja aplica las reglas de RN-06 (400: `FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`; 409: `FRANJA_BLOQUEADA`, `SIN_TARIFA`, `FRANJA_NO_DISPONIBLE`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReprogramacionInput'
+      responses:
+        '200':
+          description: Nueva reserva creada (`reprogramadaDeId` apunta a la original).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoReprogramacion'
+        '400':
+          description: Datos inválidos (`VALIDACION`, incluida una cancha de otro complejo) o franja no reservable (`FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  codigo: VALIDACION
+                  mensaje: Revisa los datos ingresados.
+                  detalles:
+                    - { campo: canchaId, mensaje: La cancha debe ser del mismo complejo }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: La reserva (`RESERVA_NO_ENCONTRADA`) o la cancha destino (`CANCHA_NO_ENCONTRADA`) no existen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_NO_ENCONTRADA, mensaje: La reserva no existe } }
+        '409':
+          description: |
+            `ESTADO_INVALIDO` (no está confirmada ni pagada), `FUERA_DE_PLAZO` (faltan 24 horas o menos),
+            o la franja nueva no está libre (`FRANJA_NO_DISPONIBLE`, `FRANJA_BLOQUEADA`, `SIN_TARIFA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: FUERA_DE_PLAZO, mensaje: Solo puedes reprogramar con más de 24 horas de anticipación. Puedes cancelar según la política de reembolso. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/pagos:
+    get:
+      operationId: listarPagosDeComplejo
+      tags: [Pagos]
+      summary: Pagos recibidos por un complejo
+      description: |
+        HU-17 (criterio 2). Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. Pagos de las reservas del complejo (de todos los estados),
+        del más reciente al más antiguo. Cada pago incluye `reembolsado` (suma de reembolsos pagados) y `reembolsoPendiente` (suma de reembolsos pendientes). `desde` y `hasta` (inclusive) filtran por la fecha del pago en hora de Bogotá; `desde` no puede ser posterior a `hasta`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: desde
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: hasta
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Pagos del complejo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pagos]
+                properties:
+                  pagos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PagoDeComplejo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/reembolsos:
+    get:
+      operationId: listarReembolsosDeComplejo
+      tags: [Pagos]
+      summary: Reembolsos de un complejo
+      description: |
+        HU-18 (criterio 1). Roles: `AdminComplejo` (dueño del complejo) o `Superadmin`. Reembolsos de las reservas del complejo con valor, motivo y estado,
+        del más reciente al más antiguo; `estado` filtra por `pendiente` o `reembolsado`. Un pago puede tener varios reembolsos. `reserva.cliente` es el nombre del jugador de la web o del cliente manual.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: estado
+          in: query
+          schema:
+            type: string
+            enum: [pendiente, reembolsado]
+      responses:
+        '200':
+          description: Reembolsos del complejo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reembolsos]
+                properties:
+                  reembolsos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReembolsoDeComplejo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /reembolsos/{id}:
+    patch:
+      operationId: resolverReembolso
+      tags: [Pagos]
+      summary: Marcar un reembolso como reembolsado
+      description: |
+        HU-18 (criterio 2). Roles: `AdminComplejo` (dueño del complejo de la reserva) o `Superadmin`. Sin cuerpo. Para pagos en línea (tarjeta, PSE, Nequi)
+        pide la devolución a la pasarela (la simulada siempre aprueba; si la pasarela falla responde 502 `PASARELA_RECHAZO` y el reembolso sigue `pendiente`).
+        Un reembolso de otro complejo responde 404.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Reembolso resuelto.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reembolso]
+                properties:
+                  reembolso:
+                    $ref: '#/components/schemas/Reembolso'
+              example:
+                reembolso: { id: 5, pagoId: 31, reservaId: 12, valor: 40000, porcentaje: 100, motivo: Cancelación de la reserva CY-000012, estado: reembolsado, fechaSolicitud: '2026-11-08T10:00:00.000Z', fechaResolucion: '2026-11-08T12:30:00.000Z' }
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El reembolso no existe o no es de un complejo del usuario (`REEMBOLSO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: REEMBOLSO_NO_ENCONTRADO, mensaje: El reembolso no existe } }
+        '409':
+          description: El reembolso ya fue marcado como reembolsado (`REEMBOLSO_YA_RESUELTO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: REEMBOLSO_YA_RESUELTO, mensaje: Este reembolso ya fue marcado como reembolsado. } }
+        '502':
+          description: La pasarela no pudo procesar la devolución (`PASARELA_RECHAZO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PASARELA_RECHAZO, mensaje: La pasarela no pudo procesar el reembolso. Intenta de nuevo más tarde. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
 components:
   securitySchemes:
     bearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      description: Identificador numérico (entero positivo).
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+
+  responses:
+    Validacion:
+      description: Datos inválidos (`VALIDACION`). `detalles` indica el campo y el mensaje de cada error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              codigo: VALIDACION
+              mensaje: Revisa los datos ingresados.
+              detalles:
+                - { campo: correo, mensaje: Ingresa un correo válido }
+    NoAutenticado:
+      description: Falta el token (`NO_AUTENTICADO`) o es inválido o expiró (`TOKEN_INVALIDO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: NO_AUTENTICADO, mensaje: Debes iniciar sesión. } }
+    CuentaInactiva:
+      description: La cuenta está suspendida o desactivada (`CUENTA_INACTIVA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CUENTA_INACTIVA, mensaje: Tu cuenta está suspendida o desactivada. Contacta al soporte. } }
+    Prohibido:
+      description: |
+        Sin permiso (`PROHIBIDO`): el rol no es el requerido o el usuario no es el administrador del complejo.
+        También `CUENTA_INACTIVA` si la cuenta está suspendida o desactivada.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: PROHIBIDO, mensaje: No tienes permiso para realizar esta acción. } }
+    NoEncontrado:
+      description: El recurso no existe (404).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: USUARIO_NO_ENCONTRADO, mensaje: El usuario no existe } }
+    ComplejoNoEncontrado:
+      description: El complejo no existe o no es visible para el usuario (`COMPLEJO_NO_ENCONTRADO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: COMPLEJO_NO_ENCONTRADO, mensaje: El complejo no existe } }
+    CanchaNoEncontrada:
+      description: La cancha no existe o no es visible para el usuario (`CANCHA_NO_ENCONTRADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CANCHA_NO_ENCONTRADA, mensaje: La cancha no existe } }
+    TarifaNoEncontrada:
+      description: La tarifa no existe o ya está desactivada (`TARIFA_NO_ENCONTRADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: TARIFA_NO_ENCONTRADA, mensaje: La tarifa no existe } }
+    CanchaDuplicada:
+      description: Ya existe una cancha con ese nombre en el complejo (`CANCHA_DUPLICADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CANCHA_DUPLICADA, mensaje: Ya existe una cancha con ese nombre en este complejo } }
+    TarifaCruzada:
+      description: La tarifa se cruza con otra activa del mismo tipo de día (`TARIFA_CRUZADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: TARIFA_CRUZADA, mensaje: La tarifa se cruza con otra tarifa activa del mismo tipo de día } }
+    ReservaNoEncontrada:
+      description: La reserva no existe o no pertenece al usuario ni a su complejo (`RESERVA_NO_ENCONTRADA`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: RESERVA_NO_ENCONTRADA, mensaje: La reserva no existe } }
+    DemasiadasPeticiones:
+      description: Se superó el límite de peticiones (`DEMASIADAS_PETICIONES`).
+      headers:
+        Retry-After:
+          description: Segundos hasta que se reinicia la ventana.
+          schema:
+            type: integer
+        RateLimit-Limit:
+          schema:
+            type: integer
+        RateLimit-Remaining:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: DEMASIADAS_PETICIONES, mensaje: Hiciste demasiados intentos. Espera un momento e intenta de nuevo. } }
+    ConflictoConcurrente:
+      description: Otra operación modificó los mismos datos al mismo tiempo (`CONFLICTO_CONCURRENTE`, interbloqueo o conflicto de serialización). Se puede reintentar. Puede ocurrir en cualquier endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: CONFLICTO_CONCURRENTE, mensaje: Otra operación modificó estos datos al mismo tiempo. Intenta de nuevo. } }
+    ErrorInterno:
+      description: Error inesperado (`ERROR_INTERNO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: ERROR_INTERNO, mensaje: Ocurrió un error inesperado. Intenta de nuevo en unos minutos. } }
+
+  schemas:
+    # ---------------------------------------------------------- Comunes
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [codigo, mensaje]
+          properties:
+            codigo:
+              type: string
+              description: Código estable en MAYÚSCULAS (VALIDACION, NO_AUTENTICADO, TOKEN_INVALIDO, PROHIBIDO, CUENTA_INACTIVA, ..., DEMASIADAS_PETICIONES, ERROR_INTERNO).
+              example: VALIDACION
+            mensaje:
+              type: string
+              description: Mensaje en español apto para el usuario final.
+            detalles:
+              type: array
+              description: Errores por campo (solo en `VALIDACION`).
+              items:
+                type: object
+                required: [campo, mensaje]
+                properties:
+                  campo:
+                    type: string
+                    example: contrasena
+                  mensaje:
+                    type: string
+            datos:
+              description: Información adicional estructurada (p. ej. reservas en conflicto).
+              type: object
+              additionalProperties: true
+    Salud:
+      type: object
+      required: [estado, baseDeDatos]
+      properties:
+        estado:
+          type: string
+          enum: [ok, degradado]
+        baseDeDatos:
+          type: string
+          enum: [ok, sin conexión]
+    Mensaje:
+      type: object
+      required: [mensaje]
+      properties:
+        mensaje:
+          type: string
+    Hora:
+      type: string
+      description: Hora del día 'HH:MM' (24 h, America/Bogota).
+      pattern: '^([01]\d|2[0-4]):[0-5]\d$'
+      example: '08:00'
+    HoraEntrada:
+      type: string
+      description: |
+        Hora 'HH:MM' (también se acepta 'HH:MM:SS'; '24:00' es la medianoche de cierre). El servidor la normaliza a 'HH:MM'.
+      pattern: '^([01]\d|2[0-4]):[0-5]\d(:[0-5]\d)?$'
+      example: '08:00'
+    TipoFutbol:
+      type: integer
+      description: Jugadores por equipo.
+      enum: [5, 6, 7, 8, 11]
+    Celular:
+      type: string
+      description: Teléfono de 7 a 15 dígitos, con `+` opcional.
+      pattern: '^\+?\d{7,15}$'
+      example: '+573001234567'
+    UrlHttps:
+      type: string
+      format: uri
+      maxLength: 255
+      pattern: '^https://'
+      example: https://cdn.canchaya.co/foto.jpg
+    Posicion:
+      type: string
+      enum: [arquero, defensa, medio, delantero]
+    Nivel:
+      type: string
+      enum: [principiante, intermedio, avanzado]
+    Rol:
+      type: string
+      enum: [Jugador, AdminComplejo, Superadmin]
+    Contrasena:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 72
+      pattern: '^(?=.*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ])(?=.*\d).+$'
+      description: Al menos 8 caracteres, con una letra y un número.
+      example: Cancha2026
+    Correo:
+      type: string
+      format: email
+      maxLength: 150
+      description: Se recorta y se convierte a minúsculas.
+      example: juan@correo.com
+
+    # ---------------------------------------------------------- Auth
+    Registro:
+      type: object
+      required: [nombres, apellidos, username, correo, celular, fechaNacimiento, contrasena, aceptaTratamientoDatos]
+      properties:
+        nombres:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Juan
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Pérez
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: '^[a-zA-Z0-9_.]+$'
+          example: juan.perez
+        correo:
+          $ref: '#/components/schemas/Correo'
+        celular:
+          $ref: '#/components/schemas/Celular'
+        fechaNacimiento:
+          type: string
+          format: date
+          description: Entre 1900-01-01 y ayer (hora de Bogotá).
+          example: '1998-05-20'
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+        aceptaTratamientoDatos:
+          type: boolean
+          enum: [true]
+          description: Debe ser `true` (Ley 1581 de 2012).
+    Login:
+      type: object
+      required: [correo, contrasena]
+      properties:
+        correo:
+          $ref: '#/components/schemas/Correo'
+        contrasena:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 200
+          description: No se valida la política de contraseña al ingresar.
+      example: { correo: juan@correo.com, contrasena: Cancha2026 }
+    TokenEnlace:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 10
+          maxLength: 200
+          description: Token recibido en el enlace del correo.
+    RecuperarContrasena:
+      type: object
+      required: [correo]
+      properties:
+        correo:
+          $ref: '#/components/schemas/Correo'
+    RestablecerContrasena:
+      type: object
+      required: [token, contrasena]
+      properties:
+        token:
+          type: string
+          minLength: 10
+          maxLength: 200
+        contrasena:
+          $ref: '#/components/schemas/Contrasena'
+    CambioContrasena:
+      type: object
+      required: [actual, nueva]
+      properties:
+        actual:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 200
+        nueva:
+          $ref: '#/components/schemas/Contrasena'
+    Perfil:
+      type: object
+      required: [nombres, apellidos, celular, fotoUrl, posicionPreferida, nivel]
+      properties:
+        nombres:
+          type: string
+          minLength: 1
+          maxLength: 80
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 80
+        celular:
+          $ref: '#/components/schemas/Celular'
+        fotoUrl:
+          type: string
+          format: uri
+          maxLength: 255
+          pattern: '^https://'
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+      example:
+        nombres: Juan
+        apellidos: Pérez
+        celular: '+573001234567'
+        fotoUrl: null
+        posicionPreferida: delantero
+        nivel: intermedio
+    Usuario:
+      type: object
+      required: [id, username, correo, nombres, apellidos, celular, fechaNacimiento, fotoUrl, posicionPreferida, nivel, rol, correoVerificado, fechaRegistro]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        correo:
+          type: string
+          format: email
+        nombres:
+          type: string
+        apellidos:
+          type: string
+        celular:
+          type: string
+        fechaNacimiento:
+          type: string
+          format: date
+        fotoUrl:
+          type: string
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+        rol:
+          $ref: '#/components/schemas/Rol'
+        correoVerificado:
+          type: boolean
+        fechaRegistro:
+          type: string
+          format: date-time
+      example:
+        id: 7
+        username: juan.perez
+        correo: juan@correo.com
+        nombres: Juan
+        apellidos: Pérez
+        celular: '+573001234567'
+        fechaNacimiento: '1998-05-20'
+        fotoUrl: null
+        posicionPreferida: delantero
+        nivel: intermedio
+        rol: Jugador
+        correoVerificado: false
+        fechaRegistro: '2026-11-07T15:04:05.000Z'
+    Sesion:
+      type: object
+      required: [token, expiraEn, usuario]
+      properties:
+        token:
+          type: string
+          description: 'JWT (HS256) para la cabecera `Authorization: Bearer`.'
+        expiraEn:
+          type: integer
+          description: Vigencia del token en segundos.
+          example: 7200
+        usuario:
+          $ref: '#/components/schemas/Usuario'
+    PerfilPublico:
+      type: object
+      description: Nunca incluye correo ni celular.
+      required: [username, nombres, apellidos, fotoUrl, posicionPreferida, nivel, fechaRegistro, partidosJugados, fairPlay, equipos]
+      properties:
+        username:
+          type: string
+        nombres:
+          type: string
+        apellidos:
+          type: string
+        fotoUrl:
+          type: string
+          nullable: true
+        posicionPreferida:
+          type: string
+          enum: [arquero, defensa, medio, delantero, null]
+          nullable: true
+        nivel:
+          type: string
+          enum: [principiante, intermedio, avanzado, null]
+          nullable: true
+        fechaRegistro:
+          type: string
+          format: date-time
+        partidosJugados:
+          type: integer
+        fairPlay:
+          type: number
+          nullable: true
+        equipos:
+          type: array
+          items:
+            type: object
+            required: [id, nombre, escudoUrl]
+            properties:
+              id:
+                type: integer
+              nombre:
+                type: string
+              escudoUrl:
+                type: string
+                nullable: true
+
+    # ---------------------------------------------------------- Complejos
+    Servicio:
+      type: object
+      required: [id, nombre]
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+          example: Parqueadero
+    Foto:
+      type: object
+      required: [id, url, orden]
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          format: uri
+        orden:
+          type: integer
+    FotoInput:
+      type: object
+      required: [url]
+      properties:
+        url:
+          $ref: '#/components/schemas/UrlHttps'
+    ServiciosInput:
+      type: object
+      required: [servicioIds]
+      properties:
+        servicioIds:
+          type: array
+          maxItems: 20
+          items:
+            type: integer
+            minimum: 1
+      example: { servicioIds: [1, 3] }
+    EstadoComplejo:
+      type: string
+      enum: [pendiente, activo, rechazado]
+    ComplejoInput:
+      type: object
+      required: [nombre, direccion, ciudad, barrio, telefono]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 120
+        descripcion:
+          type: string
+          nullable: true
+          maxLength: 2000
+          description: Un texto vacío se guarda como `null`.
+        direccion:
+          type: string
+          minLength: 1
+          maxLength: 200
+        ciudad:
+          type: string
+          minLength: 1
+          maxLength: 80
+        barrio:
+          type: string
+          minLength: 1
+          maxLength: 80
+        telefono:
+          $ref: '#/components/schemas/Celular'
+        latitud:
+          type: number
+          nullable: true
+          minimum: -90
+          maximum: 90
+        longitud:
+          type: number
+          nullable: true
+          minimum: -180
+          maximum: 180
+        porcentajeAbono:
+          type: number
+          minimum: 10
+          maximum: 100
+          default: 50
+          description: RN-03. Porcentaje del valor de la reserva que se paga como abono (50 % por defecto).
+        servicioIds:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            type: integer
+            minimum: 1
+      example:
+        nombre: Complejo El Golazo
+        descripcion: Canchas sintéticas con iluminación.
+        direccion: Calle 100 # 15-20
+        ciudad: Bogotá
+        barrio: Chicó
+        telefono: '+573001234567'
+        latitud: 4.6867
+        longitud: -74.0447
+        porcentajeAbono: 50
+        servicioIds: [1, 2]
+    Complejo:
+      type: object
+      required: [id, adminId, nombre, descripcion, direccion, ciudad, barrio, telefono, latitud, longitud, porcentajeAbono, estado, motivoRechazo, fechaCreacion, servicios, fotos]
+      properties:
+        id:
+          type: integer
+        adminId:
+          type: integer
+        nombre:
+          type: string
+        descripcion:
+          type: string
+          nullable: true
+        direccion:
+          type: string
+        ciudad:
+          type: string
+        barrio:
+          type: string
+        telefono:
+          type: string
+        latitud:
+          type: number
+          nullable: true
+        longitud:
+          type: number
+          nullable: true
+        porcentajeAbono:
+          type: number
+        estado:
+          $ref: '#/components/schemas/EstadoComplejo'
+        motivoRechazo:
+          type: string
+          nullable: true
+        fechaCreacion:
+          type: string
+          format: date-time
+        servicios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Servicio'
+        fotos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Foto'
+    ComplejoEnvuelto:
+      type: object
+      required: [complejo]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/Complejo'
+    ComplejoResumen:
+      type: object
+      required: [id, nombre, direccion, ciudad, barrio, estado, fotoPrincipal, servicios, tiposFutbol, canchasActivas, precioDesde]
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        direccion:
+          type: string
+        ciudad:
+          type: string
+        barrio:
+          type: string
+        estado:
+          $ref: '#/components/schemas/EstadoComplejo'
+        fotoPrincipal:
+          type: string
+          nullable: true
+        servicios:
+          type: array
+          description: Nombres de los servicios.
+          items:
+            type: string
+        tiposFutbol:
+          type: array
+          description: Tipos de fútbol de las canchas activas.
+          items:
+            $ref: '#/components/schemas/TipoFutbol'
+        canchasActivas:
+          type: integer
+        precioDesde:
+          type: integer
+          nullable: true
+          description: Precio mínimo (COP) entre las tarifas activas de canchas activas.
+      example:
+        id: 1
+        nombre: Complejo El Golazo
+        direccion: Calle 100 # 15-20
+        ciudad: Bogotá
+        barrio: Chicó
+        estado: activo
+        fotoPrincipal: https://cdn.canchaya.co/foto.jpg
+        servicios: [Parqueadero, Cafetería]
+        tiposFutbol: [5, 7]
+        canchasActivas: 3
+        precioDesde: 80000
+    ComplejosResumenLista:
+      type: object
+      required: [complejos]
+      properties:
+        complejos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplejoResumen'
+    ComplejoDetalle:
+      type: object
+      required: [complejo, canchas, horarios, esGestor]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/Complejo'
+        canchas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Cancha'
+        horarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Horario'
+        esGestor:
+          type: boolean
+          description: Verdadero si quien consulta es el administrador del complejo o Superadmin.
+    Aprobacion:
+      type: object
+      required: [aprobar]
+      properties:
+        aprobar:
+          type: boolean
+        motivo:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Obligatorio cuando `aprobar` es `false`.
+    CanchaInput:
+      type: object
+      required: [nombre, tipoFutbol, superficie]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 60
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        superficie:
+          type: string
+          minLength: 1
+          maxLength: 40
+          example: Sintética
+        techada:
+          type: boolean
+          default: false
+        iluminacion:
+          type: boolean
+          default: false
+        capacidadJugadores:
+          type: integer
+          minimum: 2
+          maximum: 40
+          description: Por defecto `tipoFutbol * 2`.
+        estado:
+          type: string
+          enum: [activa, inactiva]
+          default: activa
+      example:
+        nombre: Cancha 1
+        tipoFutbol: 5
+        superficie: Sintética
+        techada: false
+        iluminacion: true
+        capacidadJugadores: 10
+        estado: activa
+    Cancha:
+      type: object
+      required: [id, complejoId, nombre, tipoFutbol, superficie, techada, iluminacion, capacidadJugadores, estado]
+      properties:
+        id:
+          type: integer
+        complejoId:
+          type: integer
+        nombre:
+          type: string
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        superficie:
+          type: string
+        techada:
+          type: boolean
+        iluminacion:
+          type: boolean
+        capacidadJugadores:
+          type: integer
+        estado:
+          type: string
+          enum: [activa, inactiva]
+    CanchaEnvuelta:
+      type: object
+      required: [cancha]
+      properties:
+        cancha:
+          $ref: '#/components/schemas/Cancha'
+
+    # ---------------------------------------------------------- Horarios
+    HorarioHabitualInput:
+      type: object
+      required: [dias]
+      properties:
+        dias:
+          type: array
+          maxItems: 7
+          description: Un elemento por día abierto; `diaSemana` no puede repetirse.
+          items:
+            type: object
+            required: [diaSemana, horaApertura, horaCierre, duracionTurnoMin]
+            properties:
+              diaSemana:
+                type: integer
+                minimum: 1
+                maximum: 7
+                description: ISO, 1 = lunes ... 7 = domingo.
+              horaApertura:
+                $ref: '#/components/schemas/HoraEntrada'
+              horaCierre:
+                $ref: '#/components/schemas/HoraEntrada'
+              duracionTurnoMin:
+                type: integer
+                minimum: 30
+                maximum: 180
+                description: Duración de cada turno en minutos.
+      example:
+        dias:
+          - { diaSemana: 1, horaApertura: '08:00', horaCierre: '22:00', duracionTurnoMin: 60 }
+          - { diaSemana: 6, horaApertura: '07:00', horaCierre: '23:00', duracionTurnoMin: 60 }
+    HorarioEspecialInput:
+      description: |
+        Fecha especial (HU-07.2): reemplaza el horario habitual solo ese día, con otro horario o como día cerrado.
+        Si no se envía `cerrado`, se toma como `false` y las horas son obligatorias.
+      oneOf:
+        - type: object
+          title: Cerrado todo el día
+          required: [fecha, cerrado]
+          properties:
+            fecha:
+              type: string
+              format: date
+              description: No puede estar en el pasado.
+            cerrado:
+              type: boolean
+              enum: [true]
+        - type: object
+          title: Horario especial
+          required: [fecha, horaApertura, horaCierre, duracionTurnoMin]
+          properties:
+            fecha:
+              type: string
+              format: date
+              description: No puede estar en el pasado.
+            cerrado:
+              type: boolean
+              enum: [false]
+              default: false
+            horaApertura:
+              $ref: '#/components/schemas/HoraEntrada'
+            horaCierre:
+              $ref: '#/components/schemas/HoraEntrada'
+            duracionTurnoMin:
+              type: integer
+              minimum: 30
+              maximum: 180
+      example: { fecha: '2026-12-25', cerrado: true }
+    Horario:
+      type: object
+      description: |
+        Habitual (`diaSemana` con valor y `fechaEspecial` null) o especial (`fechaEspecial` con valor y `diaSemana` null).
+        Una fecha especial con `cerrado: true` no tiene horas ni turnos (el complejo no abre ese día).
+      required: [id, diaSemana, fechaEspecial, cerrado, horaApertura, horaCierre, duracionTurnoMin]
+      properties:
+        id:
+          type: integer
+        diaSemana:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 7
+        fechaEspecial:
+          type: string
+          format: date
+          nullable: true
+        cerrado:
+          type: boolean
+        horaApertura:
+          type: string
+          pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$'
+          nullable: true
+          example: '08:00'
+        horaCierre:
+          type: string
+          pattern: '^([01][0-9]|2[0-4]):[0-5][0-9]$'
+          nullable: true
+          example: '08:00'
+        duracionTurnoMin:
+          type: integer
+          nullable: true
+    ReservaActiva:
+      type: object
+      description: Reserva activa que queda en conflicto (la provee el módulo de reservas).
+      required: [id, codigo, canchaId, fecha, horaInicio, horaFin]
+      properties:
+        id:
+          type: integer
+        codigo:
+          type: string
+        canchaId:
+          type: integer
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+    HorariosGuardados:
+      type: object
+      required: [horarios, advertencias]
+      properties:
+        horarios:
+          type: array
+          items:
+            $ref: '#/components/schemas/Horario'
+        advertencias:
+          type: object
+          required: [reservasFueraDeHorario]
+          properties:
+            reservasFueraDeHorario:
+              type: array
+              description: Reservas activas desde hoy que quedan fuera del horario (no se eliminan).
+              items:
+                $ref: '#/components/schemas/ReservaActiva'
+
+    # ---------------------------------------------------------- Tarifas
+    TarifaInput:
+      type: object
+      required: [tipoDia, horaInicio, horaFin, precio]
+      properties:
+        tipoDia:
+          type: string
+          enum: [semana, fin_semana_festivo]
+          description: Fin de semana incluye sábado, domingo y festivos de Colombia.
+        horaInicio:
+          $ref: '#/components/schemas/HoraEntrada'
+        horaFin:
+          allOf:
+            - $ref: '#/components/schemas/HoraEntrada'
+          description: Debe ser posterior a `horaInicio`.
+        precio:
+          type: integer
+          minimum: 1
+          maximum: 100000000
+          description: Pesos colombianos (COP), sin decimales.
+      example: { tipoDia: semana, horaInicio: '08:00', horaFin: '18:00', precio: 80000 }
+    Tarifa:
+      type: object
+      required: [id, canchaId, tipoDia, horaInicio, horaFin, precio, activa]
+      properties:
+        id:
+          type: integer
+        canchaId:
+          type: integer
+        tipoDia:
+          type: string
+          enum: [semana, fin_semana_festivo]
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precio:
+          type: integer
+          description: COP.
+        activa:
+          type: boolean
+    TarifaEnvuelta:
+      type: object
+      required: [tarifa]
+      properties:
+        tarifa:
+          $ref: '#/components/schemas/Tarifa'
+
+    # ---------------------------------------------------------- Bloqueos y franjas
+    BloqueoInput:
+      type: object
+      required: [fechaInicio, fechaFin, motivo]
+      properties:
+        fechaInicio:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$'
+          description: Fecha y hora local de Bogotá, 'YYYY-MM-DDTHH:MM' (también se acepta un espacio en lugar de 'T').
+          example: '2026-12-05T08:00'
+        fechaFin:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$'
+          description: Posterior a `fechaInicio` y no en el pasado.
+          example: '2026-12-05T12:00'
+        motivo:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Mantenimiento del césped
+    Bloqueo:
+      type: object
+      required: [id, canchaId, fechaInicio, fechaFin, motivo]
+      properties:
+        id:
+          type: integer
+        canchaId:
+          type: integer
+        fechaInicio:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$'
+          description: 'YYYY-MM-DDTHH:MM, hora de Bogotá.'
+          example: '2026-12-05T08:00'
+        fechaFin:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$'
+          example: '2026-12-05T12:00'
+        motivo:
+          type: string
+    Franja:
+      type: object
+      required: [horaInicio, horaFin, precio, estado]
+      properties:
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precio:
+          type: integer
+          nullable: true
+          description: COP; `null` si no hay tarifa.
+        estado:
+          type: string
+          enum: [libre, bloqueada, pasada, sin_tarifa]
+      example: { horaInicio: '18:00', horaFin: '19:00', precio: 80000, estado: libre }
+    FranjasDia:
+      type: object
+      required: [cancha, franjas]
+      properties:
+        cancha:
+          $ref: '#/components/schemas/Cancha'
+        franjas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Franja'
+
+    # ---------------------------------------------------------- Reservas
+    EstadoReserva:
+      type: string
+      enum: [pendiente_pago, confirmada, pagada, cancelada, expirada, completada, no_asistio]
+      description: Solo `pendiente_pago`, `confirmada` y `pagada` ocupan la franja (RN-01).
+    EstadoDisponibilidad:
+      type: string
+      enum: [libre, reservada, bloqueada, pasada, sin_tarifa, partido_abierto]
+      description: '`reservada` = reserva activa; `partido_abierto` = reserva con un partido de Busca Partido con cupos.'
+    FranjaDisponible:
+      type: object
+      required: [horaInicio, horaFin, precio, estado]
+      properties:
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precio:
+          type: integer
+          nullable: true
+          description: COP; `null` si no hay tarifa.
+        estado:
+          $ref: '#/components/schemas/EstadoDisponibilidad'
+      example: { horaInicio: '18:00', horaFin: '19:00', precio: 80000, estado: libre }
+    ComplejoBusqueda:
+      type: object
+      required: [id, nombre, ciudad, barrio, direccion, fotoPrincipal, distanciaKm]
+      properties:
+        id:
+          type: integer
+        nombre:
+          type: string
+        ciudad:
+          type: string
+        barrio:
+          type: string
+        direccion:
+          type: string
+        fotoPrincipal:
+          type: string
+          nullable: true
+        distanciaKm:
+          type: number
+          nullable: true
+          description: Distancia en km (1 decimal); `null` si no se enviaron `lat` y `lng` o el complejo no tiene coordenadas.
+    ResultadoBusqueda:
+      type: object
+      description: Un complejo con sus canchas que tienen franjas libres en el rango pedido.
+      required: [complejo, canchas, precioDesde]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/ComplejoBusqueda'
+        canchas:
+          type: array
+          items:
+            type: object
+            required: [id, nombre, tipoFutbol, techada, iluminacion, franjas]
+            properties:
+              id:
+                type: integer
+              nombre:
+                type: string
+              tipoFutbol:
+                $ref: '#/components/schemas/TipoFutbol'
+              techada:
+                type: boolean
+              iluminacion:
+                type: boolean
+              franjas:
+                type: array
+                description: Solo franjas `libres` dentro del rango de horas.
+                items:
+                  $ref: '#/components/schemas/FranjaDisponible'
+        precioDesde:
+          type: integer
+          nullable: true
+          description: Precio mínimo (COP) entre las franjas libres devueltas.
+    SugerenciaFranja:
+      type: object
+      description: Franja libre cercana a la hora pedida (HU-10, criterio 3).
+      required: [complejo, cancha, franja]
+      properties:
+        complejo:
+          $ref: '#/components/schemas/ComplejoBusqueda'
+        cancha:
+          type: object
+          required: [id, nombre, tipoFutbol]
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+            tipoFutbol:
+              $ref: '#/components/schemas/TipoFutbol'
+        franja:
+          $ref: '#/components/schemas/FranjaDisponible'
+    BusquedaDisponibilidad:
+      type: object
+      required: [fecha, resultados, sugerencias, limitado]
+      properties:
+        fecha:
+          type: string
+          format: date
+        resultados:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResultadoBusqueda'
+        sugerencias:
+          type: array
+          description: Vacío salvo que no haya resultados y se haya enviado `horaDesde` (máximo 6).
+          items:
+            $ref: '#/components/schemas/SugerenciaFranja'
+        limitado:
+          type: boolean
+          description: '`true` si hay más canchas de las que se revisaron (resultado posiblemente incompleto); filtra por ciudad o tipo de fútbol.'
+    DisponibilidadComplejo:
+      type: object
+      required: [fecha, canchas]
+      properties:
+        fecha:
+          type: string
+          format: date
+        canchas:
+          type: array
+          items:
+            type: object
+            required: [id, nombre, tipoFutbol, franjas]
+            properties:
+              id:
+                type: integer
+              nombre:
+                type: string
+              tipoFutbol:
+                $ref: '#/components/schemas/TipoFutbol'
+              franjas:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FranjaDisponible'
+    CrearReservaInput:
+      type: object
+      required: [canchaId, fecha, horaInicio]
+      properties:
+        canchaId:
+          type: integer
+          minimum: 1
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          allOf:
+            - $ref: '#/components/schemas/HoraEntrada'
+          description: Debe coincidir con el inicio de una franja del horario de ese día.
+      example: { canchaId: 3, fecha: '2026-12-05', horaInicio: '18:00' }
+    ReservaManualInput:
+      type: object
+      required: [canchaId, fecha, horaInicio, nombreCliente, celularCliente]
+      properties:
+        canchaId:
+          type: integer
+          minimum: 1
+          description: Debe ser una cancha del complejo de la ruta.
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/HoraEntrada'
+        nombreCliente:
+          type: string
+          minLength: 1
+          maxLength: 120
+        celularCliente:
+          $ref: '#/components/schemas/Celular'
+      example: { canchaId: 3, fecha: '2026-12-05', horaInicio: '19:00', nombreCliente: Carlos Gómez, celularCliente: '3001234567' }
+    CambioEstadoInput:
+      type: object
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [completada, no_asistio]
+      example: { estado: no_asistio }
+    Reserva:
+      type: object
+      required: [id, codigo, usuarioId, canchaId, cancha, complejo, fecha, horaInicio, horaFin, precioTotal, abonoRequerido, saldoPendiente, totalPagado, estado, origen, nombreClienteManual, celularClienteManual, reprogramadaDeId, motivoCancelacion, fechaCreacion, fechaExpiracion, fechaCancelacion, segundosParaPagar]
+      properties:
+        id:
+          type: integer
+        codigo:
+          type: string
+          description: Código legible de la reserva.
+          example: CY-000012
+        usuarioId:
+          type: integer
+          nullable: true
+          description: '`null` en las reservas manuales.'
+        canchaId:
+          type: integer
+        cancha:
+          type: object
+          required: [nombre, tipoFutbol]
+          properties:
+            nombre:
+              type: string
+            tipoFutbol:
+              $ref: '#/components/schemas/TipoFutbol'
+        complejo:
+          type: object
+          required: [id, nombre, direccion, ciudad, barrio]
+          properties:
+            id:
+              type: integer
+            nombre:
+              type: string
+            direccion:
+              type: string
+            ciudad:
+              type: string
+            barrio:
+              type: string
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        precioTotal:
+          type: integer
+          description: COP, fijo al reservar (RN-04).
+        abonoRequerido:
+          type: integer
+          description: COP, porcentaje del complejo sobre el total (RN-03).
+        saldoPendiente:
+          type: integer
+          description: COP por pagar (precioTotal menos lo pagado).
+        totalPagado:
+          type: integer
+          description: precioTotal menos saldoPendiente.
+        estado:
+          $ref: '#/components/schemas/EstadoReserva'
+        origen:
+          type: string
+          enum: [web, manual]
+        nombreClienteManual:
+          type: string
+          nullable: true
+        celularClienteManual:
+          type: string
+          nullable: true
+        reprogramadaDeId:
+          type: integer
+          nullable: true
+          description: Id de la reserva original si esta nació de una reprogramación.
+        motivoCancelacion:
+          type: string
+          nullable: true
+        fechaCreacion:
+          type: string
+          format: date-time
+        fechaExpiracion:
+          type: string
+          format: date-time
+          nullable: true
+          description: Fin de la retención de 15 minutos (RN-02); `null` si la reserva no nació pendiente de pago.
+        fechaCancelacion:
+          type: string
+          format: date-time
+          nullable: true
+        segundosParaPagar:
+          type: integer
+          description: Segundos que quedan para pagar el abono (0 si no está `pendiente_pago`).
+    ReservaEnvuelta:
+      type: object
+      required: [reserva]
+      properties:
+        reserva:
+          $ref: '#/components/schemas/Reserva'
+    CalendarioComplejo:
+      type: object
+      required: [fecha, canchas, reservas]
+      properties:
+        fecha:
+          type: string
+          format: date
+        canchas:
+          type: array
+          description: Todas las canchas del complejo, activas e inactivas.
+          items:
+            $ref: '#/components/schemas/Cancha'
+        reservas:
+          type: array
+          description: Reservas del día en cualquier estado.
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Reserva'
+              - type: object
+                required: [nombreJugador]
+                properties:
+                  nombreJugador:
+                    type: string
+                    nullable: true
+                    description: Nombre del jugador que reservó por la web; `null` en reservas manuales.
+
+    # ---------------------------------------------------------- Pagos
+    MetodoPago:
+      type: string
+      enum: [tarjeta, pse, nequi, efectivo, transferencia]
+    TipoPago:
+      type: string
+      enum: [abono, saldo, aporte_jugador]
+    EstadoPago:
+      type: string
+      enum: [pendiente, aprobado, rechazado, reembolsado]
+    Pago:
+      type: object
+      required: [id, reservaId, usuarioId, equipoId, valor, tipo, metodo, referencia, estado, fecha]
+      properties:
+        id:
+          type: integer
+        reservaId:
+          type: integer
+        usuarioId:
+          type: integer
+          nullable: true
+        equipoId:
+          type: integer
+          nullable: true
+        valor:
+          type: integer
+          description: COP.
+        tipo:
+          $ref: '#/components/schemas/TipoPago'
+        metodo:
+          $ref: '#/components/schemas/MetodoPago'
+        referencia:
+          type: string
+          nullable: true
+          description: Referencia de la pasarela (`SIM-...` en la simulada) o la anotada por el administrador.
+        estado:
+          $ref: '#/components/schemas/EstadoPago'
+        fecha:
+          type: string
+          format: date-time
+    Reembolso:
+      type: object
+      required: [id, pagoId, reservaId, valor, porcentaje, motivo, estado, fechaSolicitud, fechaResolucion]
+      properties:
+        id:
+          type: integer
+        pagoId:
+          type: integer
+        reservaId:
+          type: integer
+        valor:
+          type: integer
+          description: COP a devolver.
+        porcentaje:
+          type: number
+          description: Porcentaje del pago que se devuelve (RN-05).
+        motivo:
+          type: string
+        estado:
+          type: string
+          enum: [pendiente, reembolsado]
+        fechaSolicitud:
+          type: string
+          format: date-time
+        fechaResolucion:
+          type: string
+          format: date-time
+          nullable: true
+    ReservaResumenPago:
+      type: object
+      description: Datos de la reserva que acompañan a un pago o reembolso en los listados del complejo.
+      required: [codigo, fecha, horaInicio, cancha, cliente]
+      properties:
+        codigo:
+          type: string
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        cancha:
+          type: string
+        cliente:
+          type: string
+          nullable: true
+          description: Nombre del jugador de la web o, en reservas manuales, el nombre del cliente manual.
+    PagoDeComplejo:
+      allOf:
+        - $ref: '#/components/schemas/Pago'
+        - type: object
+          required: [reserva, reembolsado, reembolsoPendiente]
+          properties:
+            reembolsado:
+              type: integer
+              description: COP, suma de los reembolsos ya pagados de este pago.
+            reembolsoPendiente:
+              type: integer
+              description: COP, suma de los reembolsos pendientes de este pago.
+            reserva:
+              $ref: '#/components/schemas/ReservaResumenPago'
+    ReembolsoDeComplejo:
+      allOf:
+        - $ref: '#/components/schemas/Reembolso'
+        - type: object
+          required: [reserva]
+          properties:
+            reserva:
+              $ref: '#/components/schemas/ReservaResumenPago'
+    PagoEnLineaInput:
+      type: object
+      required: [metodo]
+      properties:
+        metodo:
+          type: string
+          enum: [tarjeta, pse, nequi]
+        valor:
+          type: integer
+          minimum: 1
+          maximum: 100000000
+          description: COP. Por defecto lo que falta para cubrir el abono (`abonoRequerido - totalPagado`, máximo el saldo pendiente). Debe cumplir `totalPagado + valor >= abonoRequerido` y `valor <= saldoPendiente`.
+        datos:
+          type: object
+          description: Datos del formulario de la pasarela (solo se admiten estas claves). Con la pasarela simulada controlan el resultado (HT-08).
+          additionalProperties: false
+          properties:
+            numeroTarjeta:
+              type: string
+              pattern: '^[\d ]{12,23}$'
+              description: Solo dígitos y espacios. Si termina en `0002` y el método es `tarjeta`, el pago se rechaza. No se almacena.
+              example: '4111 1111 1111 1111'
+            resultado:
+              type: string
+              enum: [aprobado, rechazado]
+              description: Con `rechazado` la pasarela simulada rechaza el pago (útil para PSE y Nequi).
+      example: { metodo: tarjeta, datos: { numeroTarjeta: '4111 1111 1111 1111' } }
+    PagoManualInput:
+      type: object
+      required: [metodo]
+      properties:
+        tipo:
+          type: string
+          enum: [abono, saldo]
+          default: saldo
+        metodo:
+          type: string
+          enum: [efectivo, transferencia]
+        valor:
+          type: integer
+          minimum: 1
+          maximum: 100000000
+          description: COP. Por defecto todo el saldo (`saldo`) o el abono requerido (`abono`); no puede superar el saldo pendiente.
+        referencia:
+          type: string
+          nullable: true
+          maxLength: 80
+          description: Comprobante o nota. Un texto vacío se guarda como `null`.
+      example: { tipo: saldo, metodo: efectivo }
+    PagoYReserva:
+      type: object
+      required: [pago, reserva]
+      properties:
+        pago:
+          $ref: '#/components/schemas/Pago'
+        reserva:
+          $ref: '#/components/schemas/Reserva'
+    PagosDeReserva:
+      type: object
+      required: [pagos, reembolsos, resumen]
+      properties:
+        pagos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pago'
+        reembolsos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reembolso'
+        resumen:
+          type: object
+          required: [precioTotal, totalPagado, saldoPendiente]
+          properties:
+            precioTotal:
+              type: integer
+            totalPagado:
+              type: integer
+            saldoPendiente:
+              type: integer
+    CancelacionInput:
+      type: object
+      properties:
+        motivo:
+          type: string
+          nullable: true
+          maxLength: 255
+          description: Opcional para el jugador; obligatorio cuando cancela el complejo. Un texto vacío se guarda como `null`.
+      example: { motivo: No puedo asistir }
+    ReprogramacionInput:
+      type: object
+      required: [fecha, horaInicio]
+      properties:
+        fecha:
+          type: string
+          format: date
+        horaInicio:
+          $ref: '#/components/schemas/HoraEntrada'
+        canchaId:
+          type: integer
+          minimum: 1
+          description: Cancha destino, del mismo complejo. Por defecto la misma cancha.
+      example: { fecha: '2026-12-12', horaInicio: '18:00' }
+    PreviewCancelacion:
+      type: object
+      required: [horasDeAnticipacion, porcentajeReembolso, totalPagado, valorReembolso, puedeReprogramar]
+      properties:
+        horasDeAnticipacion:
+          type: number
+          description: Horas hasta el inicio (1 decimal; negativo si ya empezó).
+        porcentajeReembolso:
+          type: number
+          description: RN-05 (100, 50 o 0 por defecto; 100 si cancela el complejo).
+        totalPagado:
+          type: integer
+        valorReembolso:
+          type: integer
+          description: COP que se reembolsarían.
+        puedeReprogramar:
+          type: boolean
+    ResultadoCancelacion:
+      type: object
+      required: [reserva, porcentajeReembolso, valorReembolso]
+      properties:
+        reserva:
+          $ref: '#/components/schemas/Reserva'
+        porcentajeReembolso:
+          type: number
+        valorReembolso:
+          type: integer
+          description: COP total de los reembolsos generados (quedan `pendiente`).
+    ResultadoReprogramacion:
+      type: object
+      required: [reserva, excedenteReembolsado]
+      properties:
+        reserva:
+          $ref: '#/components/schemas/Reserva'
+        excedenteReembolsado:
+          type: integer
+          description: COP realmente enviados a reembolso por haber pagado de más (la franja nueva es más barata), repartidos entre los pagos del más reciente al más antiguo.

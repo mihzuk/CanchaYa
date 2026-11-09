@@ -88,7 +88,9 @@ Sigue las dependencias entre tablas: `Pago` referencia a `Equipo` (pago dividido
 
 ## Límites conocidos
 
-- **Tareas programadas en el mismo proceso** (HT-06): con varias instancias del backend se ejecutarían duplicadas. Hacerlas idempotentes y, más adelante, usar una cola o un bloqueo en la base de datos.
+- **Tareas programadas en el mismo proceso** (HT-06): cada tarea corre dentro de un bloqueo consultivo de PostgreSQL (`pg_try_advisory_lock`) y es idempotente, así que con varias instancias solo una la ejecuta. Si la carga crece, moverlas a un proceso o cola aparte.
+- **Transacciones y pool de conexiones**: dentro de una transacción toda consulta usa el cliente de esa transacción (parámetro `db`). Pedir otra conexión al pool desde una transacción abierta puede agotarlo con carga concurrente (lo detectó la prueba de 20 reservas simultáneas).
+- **Pasarela de pagos**: la simulada responde al instante dentro de la transacción. Con una pasarela real, registrar el pago como `pendiente`, confirmar la transacción y actualizarlo con el webhook de la pasarela.
 - **Bus de eventos en memoria**: no sobrevive a un reinicio. Lo que no pueda perderse (un pago) debe quedar como estado en la base de datos.
 - **Base de datos compartida**: los módulos se acoplan por llaves foráneas; extraer uno a un servicio aparte costaría trabajo de datos.
 - **Escalar carga** depende de índices, consultas de disponibilidad eficientes y, si hace falta, caché; no de reorganizar carpetas.

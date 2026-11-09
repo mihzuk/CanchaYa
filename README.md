@@ -338,7 +338,7 @@ La entidad "hija" es la que contiene la llave foránea. Salvo que se indique otr
 | 19 | Pago | Reserva | |
 | 20 | Pago | Usuario | FK opcional |
 | 21 | Pago | Equipo | FK opcional (pago dividido entre equipos) |
-| 22 | Reembolso | Pago | 1 : 0..1 |
+| 22 | Reembolso | Pago | 1 : N (la suma de los reembolsos no supera el valor del pago) |
 | 23 | Usuario | Rol | |
 | 24 | TokenUsuario | Usuario | |
 | 25 | ReporteUsuario | Usuario | Quien reporta |
@@ -419,41 +419,90 @@ CanchaYa/
  
 ## 7. Instalación y ejecución
 
-> El repositorio es hoy un **esqueleto**: los comandos de abajo ya están configurados, pero la aplicación no hace nada hasta que se implementen los archivos vacíos (ver [`docs/estructura.md`](docs/estructura.md)).
+### Estado del desarrollo
+
+| Sprint | Alcance | Estado |
+|---|---|---|
+| 1 | Usuarios (HU-01 a HU-04), complejos, canchas, horarios, tarifas y bloqueos (HU-05 a HU-09), HT-01 a HT-04, HT-10 | Terminado |
+| 2 | Reservas (HU-10 a HU-14), pagos (HU-16, HU-17), cancelación y reprogramación (HU-12), reembolsos (HU-18), HT-05, HT-06, HT-08 | Terminado |
+| 3 | Equipos y Busca Partido | Pendiente |
+| 4 | Pagos divididos, reembolsos, notificaciones y reputación | Pendiente |
+| 5 | Reserva recurrente, chat, reportes y administración | Pendiente |
 
 ### Con Docker
 
 ```bash
 git clone https://github.com/<usuario>/<repositorio>.git
 cd <repositorio>
-cp .env.example .env            # y cambia JWT_SECRET por un valor propio
-docker-compose up
+cp .env.example .env            # y cambia JWT_SECRET por un valor propio (mínimo 32 caracteres)
+docker-compose up               # aplica las migraciones al arrancar
+docker-compose exec backend npm run seed   # opcional: datos de prueba
 ```
 
 - Frontend: http://localhost:5173
 - API: http://localhost:3000/api/health
+- Documentación de la API (Swagger UI, se puede probar desde el navegador): http://localhost:3000/api/docs
 
 ### Sin Docker
 
-Requiere Node.js 20 o superior y PostgreSQL 16.
+Requiere Node.js 20.12 o superior y PostgreSQL 16 (con la extensión `btree_gist`, incluida en la distribución oficial).
 
 ```bash
+cp .env.example .env            # en DATABASE_URL usa localhost en lugar de db
 cd backend && npm install
 npm run migrate                 # aplica database/migrations
+npm run seed                    # opcional: datos de prueba (solo desarrollo)
 npm run dev                     # API en http://localhost:3000
 
 cd ../frontend && npm install
 npm run dev                     # web en http://localhost:5173
 ```
 
+Sin `SMTP_HOST`, en desarrollo los correos (verificación de cuenta y recuperación de contraseña) se escriben en el log del backend con su enlace.
+
+### Pagos en el ambiente de pruebas (HT-08)
+
+La pasarela de pagos es **simulada** (detrás de la interfaz `PaymentGateway`, lista para conectar Wompi, PayU o Mercado Pago):
+
+- Tarjeta: un número terminado en `0002` es rechazado; cualquier otro se aprueba.
+- PSE y Nequi: el formulario permite elegir el resultado simulado (aprobar o rechazar).
+
+Una reserva sin pago se retiene 15 minutos (RN-02); una tarea programada la expira cada minuto.
+
+### Cuentas de prueba (seed)
+
+Todas usan la contraseña `CanchaYa2026`. Solo existen si se ejecuta `npm run seed`.
+
+| Rol | Correo |
+|---|---|
+| Superadministrador | `superadmin@canchaya.local` |
+| Administrador de complejo | `admin.norte@canchaya.local`, `admin.sur@canchaya.local` |
+| Jugador | `jugador1@canchaya.local` a `jugador4@canchaya.local` |
+
 ### Verificaciones (las mismas que corre el CI)
+
+Las pruebas de integración necesitan una base PostgreSQL llamada `canchaya_test`: la suite la vacía y aplica las migraciones al empezar (por seguridad se niega a correr sobre una base cuyo nombre no termine en `_test`).
 
 ```bash
 cd backend
 npm test                        # unitarias y de integración
 npm run typecheck               # tipos de TypeScript
 npm run check:boundaries        # reglas de arquitectura entre módulos
+npm run build                   # compila a dist/ (producción: npm start)
 cd ../frontend && npm run build # tipos y compilación
 ```
+
+### Cambios respecto al modelo E-R
+
+Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el diagrama los incluye:
+
+| Tabla | Campo | Para qué |
+|---|---|---|
+| Usuario | `credenciales_desde` | Al cambiar o restablecer la contraseña, los JWT emitidos antes dejan de valer. |
+| TokenUsuario | `fecha_creacion` | Auditoría de los enlaces enviados. |
+| Reserva | `motivo_cancelacion` | HU-28.3: notificar el motivo cuando el complejo cancela o mueve una reserva. |
+| PartidoAbierto | `fecha_rival_confirmado`, `alerta_sin_rival_enviada` | HU-26.2 (plazo de 2 h para el abono del rival) y HU-22.3 (alerta única de 6 h). |
+| HorarioAtencion | `cerrado` (y horas opcionales) | HU-07.2: una fecha especial puede cerrar el complejo todo el día (migración `010`). |
+| Reembolso | `pago_id` deja de ser único | HU-12 / HU-18: un pago puede tener varios reembolsos (p. ej. la diferencia de una reprogramación y luego la cancelación); un disparador impide que sumen más que el pago (migración `011`). |
 
 ---
