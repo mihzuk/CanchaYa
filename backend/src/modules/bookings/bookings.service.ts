@@ -371,6 +371,7 @@ export const bookingsInterno = {
     for (const id of [...new Set(ids)].sort((a, b) => a - b)) await venuesApi.bloquearCancha(id, db);
   },
   idsDeComplejo: repo.idsDeComplejo,
+  porIds: repo.porIds,
   nombresDeJugadores,
   emitirExpiradas,
   /** Lanza 403/404 si el usuario no administra el complejo. */

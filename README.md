@@ -425,8 +425,8 @@ CanchaYa/
 |---|---|---|
 | 1 | Usuarios (HU-01 a HU-04), complejos, canchas, horarios, tarifas y bloqueos (HU-05 a HU-09), HT-01 a HT-04, HT-10 | Terminado |
 | 2 | Reservas (HU-10 a HU-14), pagos (HU-16, HU-17), cancelación y reprogramación (HU-12), reembolsos (HU-18), HT-05, HT-06, HT-08 | Terminado |
-| 3 | Equipos y Busca Partido | Pendiente |
-| 4 | Pagos divididos, reembolsos, notificaciones y reputación | Pendiente |
+| 3 | Equipos (HU-19 a HU-21) y Busca Partido: publicar, explorar, postularse, completar jugadores (HU-22 a HU-25) | Terminado |
+| 4 | Pagos divididos, notificaciones y reputación. Incluye lo que depende de ellas: avisos de Busca Partido (HU-12.4, HU-20.2, HU-24.1), alerta de 6 horas (HU-22.3) y acumulación de inasistencias (RN-07, RN-08) | Pendiente |
 | 5 | Reserva recurrente, chat, reportes y administración | Pendiente |
 
 ### Con Docker
@@ -503,6 +503,8 @@ Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el di
 | Reserva | `motivo_cancelacion` | HU-28.3: notificar el motivo cuando el complejo cancela o mueve una reserva. |
 | PartidoAbierto | `fecha_rival_confirmado`, `alerta_sin_rival_enviada` | HU-26.2 (plazo de 2 h para el abono del rival) y HU-22.3 (alerta única de 6 h). |
 | HorarioAtencion | `cerrado` (y horas opcionales) | HU-07.2: una fecha especial puede cerrar el complejo todo el día (migración `010`). |
+| Equipo | `capitan_propuesto_id` | HU-21.2: la capitanía cambia cuando el otro miembro acepta (migración `012`). |
+| PartidoAbierto | `posicion_deseada`; `reserva_id` único solo entre partidos no cancelados | HU-25.1, republicar una reserva y HU-22.4 (migraciones `012` y `013`). |
 | Reembolso | `pago_id` deja de ser único | HU-12 / HU-18: un pago puede tener varios reembolsos (p. ej. la diferencia de una reprogramación y luego la cancelación); un disparador impide que sumen más que el pago (migración `011`). |
 
 ---

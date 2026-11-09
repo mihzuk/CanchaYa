@@ -16,6 +16,7 @@ info:
     - Dinero: enteros en pesos colombianos (COP), sin decimales.
     - Los identificadores son enteros positivos.
     - Un JSON mal formado responde 400 `JSON_INVALIDO`; un cuerpo mayor de 100 kb responde 413 `CUERPO_DEMASIADO_GRANDE`; una ruta inexistente responde 404 `RUTA_NO_ENCONTRADA`.
+    - Un texto con caracteres NUL (`\u0000`) en cualquier entrada responde 400 `CARACTER_INVALIDO` (la base de datos no los admite).
     - Los endpoints con límite de peticiones (HT-13) responden 429 `DEMASIADAS_PETICIONES` e incluyen las cabeceras `RateLimit-Limit`, `RateLimit-Remaining` y `Retry-After`.
 
     Reservas y pagos (Sprint 2):
@@ -41,10 +42,10 @@ tags:
     description: Abonos y pagos, cancelaciones, reprogramaciones y reembolsos (EP-04, HU-12, HU-16 a HU-18, HT-08).
 
   - name: Equipos         # EP-05
-    description: Pendiente.
+    description: Equipos, invitaciones y capitanía (EP-05, HU-19 a HU-21).
 
   - name: Busca Partido   # EP-06
-    description: Pendiente.
+    description: Partidos abiertos, postulaciones de rival, cupos de jugadores y reglas RN-08 a RN-11 (EP-06, HU-22 a HU-25).
 
   - name: Notificaciones  # EP-07
     description: Pendiente.
@@ -2261,6 +2262,1251 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorInterno'
 
+  # ------------------------------------------------------------------ Sprint 3 · Equipos (EP-05)
+  /equipos:
+    post:
+      operationId: crearEquipo
+      tags: [Equipos]
+      summary: Crear un equipo
+      description: |
+        HU-19. Cualquier usuario autenticado puede crear equipos; quien lo crea queda como capitán y primer miembro.
+        El nombre (3 a 60 caracteres) es único sin distinguir mayúsculas. `escudoUrl` es opcional (HTTPS).
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipoInput'
+            example: { nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5 }
+      responses:
+        '201':
+          description: Equipo creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoEnvuelto'
+              example:
+                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '409':
+          description: Ya existe un equipo con ese nombre (`NOMBRE_EQUIPO_EN_USO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: NOMBRE_EQUIPO_EN_USO, mensaje: Ya existe un equipo con ese nombre. Elige otro. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /mis-equipos:
+    get:
+      operationId: misEquipos
+      tags: [Equipos]
+      summary: Equipos activos del usuario
+      description: HU-19, HU-20.3. Equipos activos de los que el usuario es miembro o capitán (un jugador puede estar en varios), ordenados por nombre.
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Lista de equipos.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [equipos]
+                properties:
+                  equipos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Equipo'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}:
+    get:
+      operationId: detalleEquipo
+      tags: [Equipos]
+      summary: Perfil público del equipo con su plantilla
+      description: |
+        HU-19, HU-21. Público; con token opcional se calculan `esMiembro` y `esCapitan`. Los datos de los jugadores son públicos
+        y nunca incluyen correo ni celular (HU-04): solo `username`, `nombre` y `fotoUrl`.
+        Quien no es miembro recibe `capitanPropuestoId: null`.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Equipo y plantilla.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoDetalle'
+              example:
+                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
+                miembros:
+                  - { usuarioId: 12, username: juanp, nombre: Juan Pérez, fotoUrl: null, rolEnEquipo: capitan, fechaIngreso: '2026-11-09T15:00:00.000Z' }
+                esMiembro: false
+                esCapitan: false
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/EquipoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    put:
+      operationId: actualizarEquipo
+      tags: [Equipos]
+      summary: Editar escudo y nivel del equipo
+      description: |
+        HU-19. Solo el capitán del equipo (se valida en el servicio) y el equipo debe estar activo. El nombre y el tipo de fútbol no se modifican.
+        Ambos campos se reemplazan: si se omite `escudoUrl` (o va `null`) el escudo se borra.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquipoEdicionInput'
+            example: { escudoUrl: 'https://cdn.canchaya.co/escudo.png', nivel: avanzado }
+      responses:
+        '200':
+          description: Equipo actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/EquipoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/invitaciones:
+    post:
+      operationId: invitarJugador
+      tags: [Equipos]
+      summary: Invitar a un jugador por nombre de usuario
+      description: |
+        HU-20.1. Solo el capitán. El invitado ve la invitación en `/mis-invitaciones` y la acepta o rechaza. Límite: 30 peticiones por hora y usuario
+        (compartido con la creación de enlaces); al superarlo responde 429.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvitarJugadorInput'
+            example: { username: maria_g }
+      responses:
+        '201':
+          description: Invitación creada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitacion]
+                properties:
+                  invitacion:
+                    $ref: '#/components/schemas/Invitacion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) o el jugador (`USUARIO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: USUARIO_NO_ENCONTRADO, mensaje: No existe un jugador con ese nombre de usuario } }
+        '409':
+          description: El equipo está inactivo (`EQUIPO_INACTIVO`), el jugador ya es miembro (`YA_ES_MIEMBRO`) o ya tiene una invitación pendiente (`INVITACION_PENDIENTE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INVITACION_PENDIENTE, mensaje: Ese jugador ya tiene una invitación pendiente. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      operationId: invitacionesDeEquipo
+      tags: [Equipos]
+      summary: Invitaciones del equipo
+      description: HU-20. Solo el capitán. Lista las invitaciones (por usuario y por enlace) con su estado. Los enlaces nunca incluyen el token.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Invitaciones del equipo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitacionesLista'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/EquipoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/invitaciones/{invitacionId}:
+    delete:
+      operationId: revocarInvitacion
+      tags: [Equipos]
+      summary: Revocar una invitación pendiente
+      description: |
+        HU-20. Solo el capitán. Funciona para invitaciones por usuario y para enlaces: la invitación pasa a `rechazada` y un enlace revocado
+        deja de servir (`TOKEN_INVALIDO`). Solo se pueden revocar invitaciones `pendiente` del propio equipo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: invitacionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: Invitación revocada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) o la invitación (`INVITACION_NO_ENCONTRADA`, también si no es del equipo o ya no está pendiente) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INVITACION_NO_ENCONTRADA, mensaje: La invitación no existe } }
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/enlaces:
+    post:
+      operationId: crearEnlaceEquipo
+      tags: [Equipos]
+      summary: Crear un enlace de invitación
+      description: |
+        HU-20.1. Solo el capitán. Devuelve un `token` que se muestra UNA sola vez (en la base de datos solo se guarda su hash SHA-256) y vale 7 días
+        (`validoPorDias`). El enlace puede usarlo más de un jugador hasta que expire o el capitán lo revoque con
+        `DELETE /equipos/{id}/invitaciones/{invitacionId}`. Para compartirlo se arma la URL de la web con ese token. Límite: 30 peticiones por hora y usuario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '201':
+          description: Enlace creado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnlaceEquipo'
+              example: { token: 9f2c1d7a5b8e4c3fa0d6e1b2c3a4f5e6d7c8b9a0f1e2d3c4b5a69788796a5b4c, validoPorDias: 7 }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/EquipoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /mis-invitaciones:
+    get:
+      operationId: misInvitaciones
+      tags: [Equipos]
+      summary: Invitaciones recibidas por el usuario
+      description: HU-20.2. Invitaciones por nombre de usuario dirigidas al usuario autenticado.
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Invitaciones del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitacionesLista'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /invitaciones/{id}/respuesta:
+    post:
+      operationId: responderInvitacion
+      tags: [Equipos]
+      summary: Aceptar o rechazar una invitación
+      description: |
+        HU-20.2, HU-20.3. Solo el jugador invitado. Si acepta, entra a la plantilla como `miembro` y conserva sus otros equipos;
+        si rechaza, se notifica al capitán.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespuestaInput'
+            example: { aceptar: true }
+      responses:
+        '204':
+          description: Respuesta registrada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: La invitación no existe o no es del usuario (`INVITACION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INVITACION_NO_ENCONTRADA, mensaje: La invitación no existe } }
+        '409':
+          description: La invitación ya fue respondida (`INVITACION_RESUELTA`) o, al aceptar, el equipo está inactivo (`EQUIPO_INACTIVO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INVITACION_RESUELTA, mensaje: Esta invitación ya fue respondida. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /enlaces-equipo/{token}:
+    get:
+      operationId: vistaEnlaceEquipo
+      tags: [Equipos]
+      summary: Ver el equipo de un enlace de invitación
+      description: |
+        HU-20.1. Público, sin sesión. Muestra el equipo para la página "unirme" sin consumir el enlace. Solo datos públicos del equipo
+        (nunca correo ni celular). Límite: 20 peticiones por minuto y por IP (dificulta adivinar tokens).
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/TokenEnlaceEquipo'
+      responses:
+        '200':
+          description: Equipo al que invita el enlace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VistaEnlaceEquipo'
+              example: { equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, totalMiembros: 4 } }
+        '400':
+          description: Token mal formado (`VALIDACION`), inexistente o revocado (`TOKEN_INVALIDO`) o expirado (`TOKEN_EXPIRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_EXPIRADO, mensaje: El enlace de invitación expiró. Pide uno nuevo al capitán. } }
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /enlaces-equipo/{token}/unirse:
+    post:
+      operationId: unirseConEnlace
+      tags: [Equipos]
+      summary: Unirse a un equipo con un enlace
+      description: |
+        HU-20.1. Cualquier jugador autenticado. Entra como `miembro`; el enlace no se consume (sigue valiendo 7 días desde su creación).
+        Límite: 20 peticiones por minuto y por IP.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/TokenEnlaceEquipo'
+      responses:
+        '200':
+          description: Ya eres parte del equipo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoEnvuelto'
+        '400':
+          description: Token mal formado (`VALIDACION`), inexistente o revocado (`TOKEN_INVALIDO`) o expirado (`TOKEN_EXPIRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: TOKEN_INVALIDO, mensaje: El enlace de invitación no es válido o fue revocado. } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '409':
+          description: El equipo está inactivo (`EQUIPO_INACTIVO`) o el usuario ya es miembro (`YA_ES_MIEMBRO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: YA_ES_MIEMBRO, mensaje: Ya eres miembro de este equipo. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/miembros/{usuarioId}:
+    delete:
+      operationId: expulsarMiembro
+      tags: [Equipos]
+      summary: Expulsar a un miembro
+      description: |
+        HU-21.1. Solo el capitán. El expulsado deja de ver lo privado del equipo (p. ej. sus partidos). El capitán no puede expulsarse a sí mismo
+        (debe ceder la capitanía o salir). Si el expulsado tenía una propuesta de capitanía pendiente, se anula. Además se revocan los enlaces de invitación activos del equipo y las invitaciones pendientes de ese usuario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: usuarioId
+          in: path
+          required: true
+          description: Identificador del jugador a expulsar.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '204':
+          description: Miembro expulsado.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) o el miembro (`MIEMBRO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MIEMBRO_NO_ENCONTRADO, mensaje: Ese jugador no está en el equipo } }
+        '409':
+          description: El equipo está inactivo (`EQUIPO_INACTIVO`) o se intentó expulsar al capitán (`CAPITAN_NO_EXPULSABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CAPITAN_NO_EXPULSABLE, mensaje: 'El capitán no puede expulsarse. Cede la capitanía o sal del equipo.' } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/salir:
+    post:
+      operationId: salirDelEquipo
+      tags: [Equipos]
+      summary: Salir de un equipo
+      description: |
+        HU-21.3. Cualquier miembro. Un capitán con más miembros debe ceder antes la capitanía (`CAPITAN_DEBE_CEDER`). Si el capitán es el único miembro,
+        el equipo queda `inactivo` (`equipoInactivo: true`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: El usuario salió del equipo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [equipoInactivo]
+                properties:
+                  equipoInactivo:
+                    type: boolean
+                    description: Verdadero si el equipo quedó inactivo por no tener más miembros.
+              example: { equipoInactivo: false }
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) no existe o el usuario no es miembro (`MIEMBRO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MIEMBRO_NO_ENCONTRADO, mensaje: No eres miembro de este equipo } }
+        '409':
+          description: El capitán debe ceder la capitanía antes de salir (`CAPITAN_DEBE_CEDER`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: CAPITAN_DEBE_CEDER, mensaje: Cede la capitanía a otro miembro antes de salir del equipo. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/capitania:
+    post:
+      operationId: proponerCapitania
+      tags: [Equipos]
+      summary: Proponer ceder la capitanía
+      description: |
+        HU-21.2. Solo el capitán. Propone a otro miembro; el cambio ocurre cuando ese miembro acepta en `/equipos/{id}/capitania/respuesta`.
+        Una nueva propuesta reemplaza a la anterior (`capitanPropuestoId`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CederCapitaniaInput'
+            example: { usuarioId: 15 }
+      responses:
+        '200':
+          description: Propuesta registrada (el equipo muestra `capitanPropuestoId`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoEnvuelto'
+        '400':
+          description: Datos inválidos (`VALIDACION`), p. ej. se propone a sí mismo ("Ya eres el capitán").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: VALIDACION, mensaje: Revisa los datos ingresados., detalles: [{ campo: usuarioId, mensaje: Ya eres el capitán }] } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) no existe o el propuesto no es miembro (`MIEMBRO_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MIEMBRO_NO_ENCONTRADO, mensaje: Ese jugador no está en el equipo } }
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/capitania/respuesta:
+    post:
+      operationId: responderCapitania
+      tags: [Equipos]
+      summary: Aceptar o rechazar la capitanía propuesta
+      description: HU-21.2. Solo el miembro propuesto como capitán. Al aceptar pasa a ser el capitán; al rechazar se limpia la propuesta.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespuestaInput'
+            example: { aceptar: true }
+      responses:
+        '200':
+          description: Equipo actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquipoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/EquipoNoEncontrado'
+        '409':
+          description: El usuario no tiene una propuesta de capitanía en ese equipo (`SIN_PROPUESTA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: SIN_PROPUESTA, mensaje: No tienes una propuesta de capitanía en este equipo. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  # ------------------------------------------------------------------ Sprint 3 · Busca Partido (EP-06)
+  /partidos:
+    get:
+      operationId: explorarPartidos
+      tags: [Busca Partido]
+      summary: Explorar partidos abiertos
+      description: |
+        HU-23. Público, sin sesión y sin paginación. Solo partidos en estado `buscando`, vigentes (la reserva sigue activa y no ha empezado, o la fecha preferida
+        no ha pasado). Los filtros se combinan con AND: fecha, ventana de hora de inicio (`horaDesde` inclusive, `horaHasta` exclusiva), ciudad/barrio
+        (subcadena sin distinguir mayúsculas; en partidos sin cancha se compara con la `zona`), tipo de fútbol, nivel y modalidad.
+        Un partido de una reserva cancelada no aparece (HU-12.4), ni tampoco los de equipos publicadores inactivos o suspendidos. `fairPlay` es la reputación del equipo, o `null` si aún no tiene.
+      security: []
+      parameters:
+        - { name: fecha, in: query, schema: { type: string, format: date }, example: '2026-11-20' }
+        - { name: horaDesde, in: query, schema: { $ref: '#/components/schemas/HoraEntrada' } }
+        - { name: horaHasta, in: query, description: Debe ser posterior a `horaDesde`., schema: { $ref: '#/components/schemas/HoraEntrada' } }
+        - { name: ciudad, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: barrio, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: tipoFutbol, in: query, schema: { $ref: '#/components/schemas/TipoFutbol' } }
+        - { name: nivel, in: query, schema: { $ref: '#/components/schemas/Nivel' } }
+        - { name: modalidad, in: query, schema: { $ref: '#/components/schemas/ModalidadPartido' } }
+      responses:
+        '200':
+          description: Partidos abiertos que cumplen los filtros.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidosLista'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: publicarPartido
+      tags: [Busca Partido]
+      summary: Publicar un partido abierto
+      description: |
+        HU-22 y HU-25. Solo el capitán (equipo activo) del equipo publicador. El cuerpo es una unión discriminada por `modalidad`:
+        - `busco_rival`: el dueño de la reserva busca otro equipo. `aceptacionAutomatica` confirma al primer postulante; `porcentajePagoRival` (0-100, 50 por defecto) define qué parte del precio paga el rival (HU-22.2).
+        - `faltan_jugadores`: faltan `cuposDisponibles` jugadores (RN-10: entre 1 y 2 x tipo de fútbol, p. ej. 10 en fútbol 5); `aportePorJugador` en COP.
+        - `busco_partido_sin_cancha`: no hay reserva; se indica fecha preferida, rango de horas y zona (HU-22.4).
+
+        Con reserva (`busco_rival`, `faltan_jugadores`): la reserva debe ser del usuario (si no, 404 `RESERVA_NO_ENCONTRADA`), estar `confirmada` o `pagada` y faltar al menos
+        el mínimo de horas configurado (3 por defecto) (RN-09), el tipo de fútbol del equipo debe coincidir con el de la cancha, el equipo no puede tener un partido que se cruce (RN-11),
+        y una reserva solo puede tener un partido activo. RN-08: un equipo suspendido por inasistencias no puede publicar (403 `EQUIPO_SUSPENDIDO`, con `datos.suspendidoHasta`).
+        Límite: 30 publicaciones por hora y usuario.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicarPartidoInput'
+            examples:
+              buscoRival:
+                summary: Busco rival (con reserva)
+                value: { modalidad: busco_rival, equipoId: 7, reservaId: 42, nivelBuscado: intermedio, descripcion: Partido amistoso, aceptacionAutomatica: false, porcentajePagoRival: 50 }
+              faltanJugadores:
+                summary: Faltan jugadores (con reserva)
+                value: { modalidad: faltan_jugadores, equipoId: 7, reservaId: 42, nivelBuscado: principiante, cuposDisponibles: 2, aportePorJugador: 8000 }
+              sinCancha:
+                summary: Busco partido sin cancha
+                value: { modalidad: busco_partido_sin_cancha, equipoId: 7, nivelBuscado: intermedio, fechaPreferida: '2026-11-20', rangoHoraInicio: '19:00', rangoHoraFin: '22:00', zona: Chapinero }
+      responses:
+        '201':
+          description: Partido publicado en estado `buscando`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoEnvuelto'
+        '400':
+          description: Datos inválidos (`VALIDACION`), p. ej. cupos por encima del máximo (RN-10), hora final no posterior a la inicial o fecha ya pasada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: VALIDACION, mensaje: Revisa los datos ingresados., detalles: [{ campo: cuposDisponibles, mensaje: Máximo 10 cupos en fútbol 5 }] } }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: El usuario no es el capitán (`PROHIBIDO`), el equipo está suspendido (`EQUIPO_SUSPENDIDO`, RN-08) o la cuenta está inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: EQUIPO_SUSPENDIDO, mensaje: Tu equipo está suspendido de Busca Partido por inasistencias., datos: { suspendidoHasta: '2026-11-24T15:00:00.000Z' } } }
+        '404':
+          description: El equipo (`EQUIPO_NO_ENCONTRADO`) o la reserva (`RESERVA_NO_ENCONTRADA`, también si no es del usuario) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_NO_ENCONTRADA, mensaje: La reserva no existe } }
+        '409':
+          description: |
+            `RESERVA_NO_CONFIRMADA` y `ANTICIPACION_INSUFICIENTE` (RN-09), `EQUIPO_INACTIVO`, `MODALIDAD_INCOMPATIBLE` (tipo de fútbol distinto),
+            `CRUCE_DE_HORARIO` (RN-11) o `YA_PUBLICADA` (la reserva ya tiene un partido activo).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: ANTICIPACION_INSUFICIENTE, mensaje: Solo puedes publicar con al menos 3 horas de anticipación al partido. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}:
+    get:
+      operationId: detallePartido
+      tags: [Busca Partido]
+      summary: Detalle de un partido con el perfil del equipo publicador
+      description: |
+        HU-23.3. Público; con token opcional se calcula `esCapitanPublicador`. Incluye los últimos resultados del equipo publicador y, con sesión, la participación propia (`miPostulacion` si capitanea un equipo postulado, `miInscripcion` si solicitó un cupo); sin sesión o sin solicitud ambos son `null`. Los datos de equipos
+        son públicos y no contienen correo ni celular.
+      security:
+        - {}
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Partido y resultados recientes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoDetalle'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/cancelar:
+    post:
+      operationId: cancelarPartido
+      tags: [Busca Partido]
+      summary: Retirar un partido publicado
+      description: |
+        Solo el capitán del equipo publicador. Posible en estado `buscando`, `rival_confirmado` o `completo`. La reserva no se cancela (sigue siendo del jugador).
+        Si el partido se cancela porque se cancela o reprograma su reserva (HU-12.4), lo hace el sistema automáticamente, sin pasar por este endpoint.
+        Un partido cuya reserva ya empezó no se puede cancelar (409 `PARTIDO_INICIADO`). El sistema también cierra el partido solo cuando termina su reserva
+        (`jugado` si se jugó, `cancelado` si no) y, cuando el equipo publicador pasa a inactivo, cancela sus partidos publicados; si un equipo inactivo era el rival
+        confirmado, el partido vuelve a `buscando`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Partido cancelado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: El partido (`PARTIDO_NO_ENCONTRADO`) o su equipo (`EQUIPO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_NO_ENCONTRADO, mensaje: El partido no existe } }
+        '409':
+          description: El partido ya no se puede cancelar (`PARTIDO_CERRADO`, estado `cancelado` o `jugado`), el partido ya empezó (`PARTIDO_INICIADO`) o el equipo está inactivo (`EQUIPO_INACTIVO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_CERRADO, mensaje: Este partido ya no se puede cancelar. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /equipos/{id}/partidos:
+    get:
+      operationId: partidosDeEquipo
+      tags: [Busca Partido]
+      summary: Partidos de un equipo
+      description: HU-21.1. Solo miembros del equipo (o `Superadmin`). Los partidos del equipo no son visibles para quien no pertenece a él.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Partidos del equipo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidosLista'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: El usuario no es miembro del equipo (`PROHIBIDO`) o su cuenta está inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo los miembros del equipo pueden ver sus partidos. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/postulaciones:
+    post:
+      operationId: postularEquipo
+      tags: [Busca Partido]
+      summary: Postular un equipo como rival
+      description: |
+        HU-24. Solo el capitán del equipo que se postula, y solo en partidos `busco_rival` en estado `buscando` con reserva activa que no ha empezado.
+        El tipo de fútbol del equipo debe coincidir con el de la cancha, no puede estar suspendido (RN-08) ni tener un partido que se cruce (RN-11, HU-24.4).
+        Con `aceptacionAutomatica` el rival queda confirmado de inmediato (`confirmado: true`) y las demás solicitudes se rechazan; si no, queda `pendiente` hasta
+        que responda el capitán publicador (RN-10: un solo rival).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostularInput'
+            example: { equipoId: 9 }
+      responses:
+        '201':
+          description: Postulación registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoPostulacion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: No es capitán del equipo (`PROHIBIDO`), equipo suspendido (`EQUIPO_SUSPENDIDO`, RN-08) o cuenta inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo el capitán del equipo puede hacer esto. } }
+        '404':
+          description: El partido (`PARTIDO_NO_ENCONTRADO`) o el equipo (`EQUIPO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_NO_ENCONTRADO, mensaje: El partido no existe } }
+        '409':
+          description: |
+            `MODALIDAD_INVALIDA` (el partido no busca rival), `PARTIDO_CERRADO`, `MISMO_EQUIPO`, `EQUIPO_INACTIVO`, `MODALIDAD_INCOMPATIBLE`,
+            `CRUCE_DE_HORARIO` (RN-11), `YA_POSTULADO` o `EQUIPO_NO_DISPONIBLE` (el otro equipo del partido está inactivo o suspendido, RN-08).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: YA_POSTULADO, mensaje: Tu equipo ya se postuló a este partido. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      operationId: postulacionesDePartido
+      tags: [Busca Partido]
+      summary: Solicitudes de rival recibidas
+      description: HU-24. Solo el capitán del equipo publicador. Lista todas las postulaciones del partido con el resumen (público) de cada equipo.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Postulaciones.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [postulaciones]
+                properties:
+                  postulaciones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Postulacion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /postulaciones/{id}/respuesta:
+    post:
+      operationId: responderPostulacion
+      tags: [Busca Partido]
+      summary: Aceptar o rechazar una solicitud de rival
+      description: |
+        HU-24.2. Solo el capitán del equipo publicador. Aceptar confirma al rival, pasa el partido a `rival_confirmado` y rechaza las demás solicitudes (RN-10);
+        antes se revalida que el partido siga abierto, que el rival no esté suspendido (RN-08) y que no tenga un cruce de horario (RN-11).
+        Rechazar solo marca la solicitud como `rechazada`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespuestaInput'
+            example: { aceptar: true }
+      responses:
+        '200':
+          description: Partido actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: No es el capitán publicador (`PROHIBIDO`), el equipo rival está suspendido (`EQUIPO_SUSPENDIDO`) o cuenta inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo el capitán del equipo puede hacer esto. } }
+        '404':
+          description: La postulación no existe (`POSTULACION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: POSTULACION_NO_ENCONTRADA, mensaje: La solicitud no existe } }
+        '409':
+          description: La solicitud ya fue resuelta (`POSTULACION_RESUELTA`), el partido ya no está disponible (`PARTIDO_CERRADO`), `EQUIPO_INACTIVO`, `CRUCE_DE_HORARIO` (RN-11) o `EQUIPO_NO_DISPONIBLE` (el otro equipo del partido está inactivo o suspendido, RN-08).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: POSTULACION_RESUELTA, mensaje: Esta solicitud ya fue resuelta. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /postulaciones/{id}:
+    delete:
+      operationId: retirarPostulacion
+      tags: [Busca Partido]
+      summary: Retirar una postulación
+      description: HU-24. Solo el capitán del equipo que se postuló. Solo mientras esté `pendiente`; pasa a `anulada`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Postulación anulada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: La postulación no existe (`POSTULACION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: POSTULACION_NO_ENCONTRADA, mensaje: La solicitud no existe } }
+        '409':
+          description: La solicitud ya fue resuelta (`POSTULACION_RESUELTA`) o el equipo está inactivo (`EQUIPO_INACTIVO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: POSTULACION_RESUELTA, mensaje: Esta solicitud ya fue resuelta. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/aceptar-con-reserva:
+    post:
+      operationId: aceptarConReserva
+      tags: [Busca Partido]
+      summary: Aceptar un "busco partido sin cancha" aportando una reserva
+      description: |
+        HU-22.4. Solo el capitán de `equipoId`, que además debe ser el dueño de `reservaId`. El partido debe ser `busco_partido_sin_cancha` en estado `buscando`.
+        La reserva debe ser publicable (RN-09: `confirmada` o `pagada` con la anticipación mínima), caer en la fecha y dentro del rango de horas pedidos
+        (`RESERVA_FUERA_DE_RANGO`) y ser del tipo de fútbol de ambos equipos. Ninguno de los dos equipos puede tener un cruce de horario (RN-11) y el aceptante no puede estar suspendido (RN-08).
+        El partido queda `rival_confirmado` con la reserva asociada.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AceptarConReservaInput'
+            example: { equipoId: 9, reservaId: 51 }
+      responses:
+        '200':
+          description: Partido con rival y reserva confirmados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: No es capitán del equipo (`PROHIBIDO`), equipo suspendido (`EQUIPO_SUSPENDIDO`) o cuenta inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo el capitán del equipo puede hacer esto. } }
+        '404':
+          description: El partido (`PARTIDO_NO_ENCONTRADO`), la reserva (`RESERVA_NO_ENCONTRADA`, también si no es del usuario) o el equipo (`EQUIPO_NO_ENCONTRADO`) no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_NO_ENCONTRADA, mensaje: La reserva no existe } }
+        '409':
+          description: |
+            `MODALIDAD_INVALIDA`, `PARTIDO_CERRADO`, `MISMO_EQUIPO`, `RESERVA_NO_CONFIRMADA` / `ANTICIPACION_INSUFICIENTE` (RN-09), `RESERVA_FUERA_DE_RANGO`,
+            `EQUIPO_INACTIVO`, `MODALIDAD_INCOMPATIBLE`, `CRUCE_DE_HORARIO` (RN-11) `YA_PUBLICADA` (la reserva ya está en otro partido) o `EQUIPO_NO_DISPONIBLE` (el otro equipo del partido está inactivo o suspendido, RN-08).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_FUERA_DE_RANGO, mensaje: Tu reserva no está dentro de la fecha y las horas que pide este equipo. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/inscripciones:
+    post:
+      operationId: inscribirseAPartido
+      tags: [Busca Partido]
+      summary: Solicitar un cupo en un partido "faltan jugadores"
+      description: |
+        HU-25. Cualquier jugador autenticado que no sea miembro del equipo publicador. Solo partidos `faltan_jugadores` en estado `buscando` con reserva activa
+        que no ha empezado. La solicitud queda `pendiente` hasta que la responda el capitán publicador. Tras una solicitud rechazada el jugador puede volver a inscribirse. `aporte` es lo que debe aportar el jugador (COP).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InscribirseInput'
+            example: { posicion: delantero }
+      responses:
+        '201':
+          description: Solicitud registrada.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inscripcion]
+                properties:
+                  inscripcion:
+                    $ref: '#/components/schemas/InscripcionCreada'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: '`MODALIDAD_INVALIDA` (el partido no busca jugadores), `PARTIDO_CERRADO`, `YA_ES_MIEMBRO` (del equipo publicador), `YA_INSCRITO` (solo si hay una solicitud pendiente o aceptada) o `EQUIPO_NO_DISPONIBLE` (el otro equipo del partido está inactivo o suspendido, RN-08).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: YA_INSCRITO, mensaje: Ya solicitaste un cupo en este partido. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      operationId: inscripcionesDePartido
+      tags: [Busca Partido]
+      summary: Solicitudes de cupo recibidas
+      description: HU-25. Solo el capitán del equipo publicador. El jugador se muestra solo con `username`, `nombre` y `fotoUrl` (nunca correo ni celular).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Inscripciones.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inscripciones]
+                properties:
+                  inscripciones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Inscripcion'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          $ref: '#/components/responses/EquipoInactivo'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /inscripciones/{id}/respuesta:
+    post:
+      operationId: responderInscripcion
+      tags: [Busca Partido]
+      summary: Aceptar o rechazar una solicitud de cupo
+      description: |
+        HU-25.2 y HU-25.3. Solo el capitán del equipo publicador. Aceptar descuenta un cupo; al aceptar el último, el partido pasa a `completo` y las solicitudes
+        pendientes restantes se rechazan. Rechazar solo marca la solicitud como `rechazada`.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RespuestaInput'
+            example: { aceptar: true }
+      responses:
+        '200':
+          description: Partido actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartidoEnvuelto'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          description: La inscripción no existe (`INSCRIPCION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INSCRIPCION_NO_ENCONTRADA, mensaje: La solicitud no existe } }
+        '409':
+          description: La solicitud ya fue resuelta (`INSCRIPCION_RESUELTA`), el partido ya no está disponible (`PARTIDO_CERRADO`, solo al aceptar) o `EQUIPO_INACTIVO`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INSCRIPCION_RESUELTA, mensaje: Esta solicitud ya fue resuelta. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /inscripciones/{id}:
+    delete:
+      operationId: retirarInscripcion
+      tags: [Busca Partido]
+      summary: Retirar una solicitud de cupo
+      description: |
+        HU-25. Solo el jugador que se inscribió. Permitido mientras esté `pendiente` o `aceptada`; si ya tenía cupo aceptado, el cupo vuelve a quedar libre
+        (el partido vuelve a `buscando`) siempre que el partido no haya empezado. La inscripción se elimina.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Solicitud retirada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: La inscripción no existe o no es del usuario (`INSCRIPCION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: INSCRIPCION_NO_ENCONTRADA, mensaje: La solicitud no existe } }
+        '409':
+          description: La solicitud fue rechazada (`INSCRIPCION_RESUELTA`) o el partido ya empezó (`PARTIDO_INICIADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_INICIADO, mensaje: El partido ya empezó. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
 components:
   securitySchemes:
     bearer:
@@ -2278,6 +3524,16 @@ components:
         type: integer
         minimum: 1
       example: 1
+
+    TokenEnlaceEquipo:
+      name: token
+      in: path
+      required: true
+      description: Token del enlace de invitación (10 a 200 caracteres). Se muestra una sola vez al crearlo.
+      schema:
+        type: string
+        minLength: 10
+        maxLength: 200
 
   responses:
     Validacion:
@@ -2396,6 +3652,35 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
           example: { error: { codigo: ERROR_INTERNO, mensaje: Ocurrió un error inesperado. Intenta de nuevo en unos minutos. } }
+
+    EquipoNoEncontrado:
+      description: El equipo no existe (`EQUIPO_NO_ENCONTRADO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: EQUIPO_NO_ENCONTRADO, mensaje: El equipo no existe } }
+    PartidoNoEncontrado:
+      description: El partido no existe (`PARTIDO_NO_ENCONTRADO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: PARTIDO_NO_ENCONTRADO, mensaje: El partido no existe } }
+    SoloCapitan:
+      description: El usuario no es el capitán del equipo (`PROHIBIDO`) o su cuenta está inactiva (`CUENTA_INACTIVA`). La autorización se valida en el servicio.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: PROHIBIDO, mensaje: Solo el capitán del equipo puede hacer esto. } }
+    EquipoInactivo:
+      description: El equipo está inactivo (`EQUIPO_INACTIVO`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: { codigo: EQUIPO_INACTIVO, mensaje: Este equipo está inactivo. } }
 
   schemas:
     # ---------------------------------------------------------- Comunes
@@ -3830,3 +5115,580 @@ components:
         excedenteReembolsado:
           type: integer
           description: COP realmente enviados a reembolso por haber pagado de más (la franja nueva es más barata), repartidos entre los pagos del más reciente al más antiguo.
+
+    # ---------------------------------------------------------- Equipos (Sprint 3)
+    EstadoEquipo:
+      type: string
+      enum: [activo, inactivo]
+    EquipoInput:
+      type: object
+      required: [nombre, nivel, tipoFutbol]
+      properties:
+        nombre:
+          type: string
+          minLength: 3
+          maxLength: 60
+          description: Único sin distinguir mayúsculas.
+          example: Los Cracks
+        escudoUrl:
+          type: string
+          format: uri
+          maxLength: 255
+          pattern: '^https://'
+          nullable: true
+          default: null
+        nivel:
+          $ref: '#/components/schemas/Nivel'
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+    EquipoEdicionInput:
+      type: object
+      required: [nivel]
+      properties:
+        escudoUrl:
+          type: string
+          format: uri
+          maxLength: 255
+          pattern: '^https://'
+          nullable: true
+          default: null
+          description: Se reemplaza siempre; si se omite o es `null` se borra el escudo.
+        nivel:
+          $ref: '#/components/schemas/Nivel'
+    Equipo:
+      type: object
+      required: [id, nombre, escudoUrl, nivel, tipoFutbol, estado, capitanId, capitanPropuestoId, inasistencias, suspendidoHasta, fechaCreacion, totalMiembros]
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        escudoUrl:
+          type: string
+          nullable: true
+        nivel:
+          $ref: '#/components/schemas/Nivel'
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        estado:
+          $ref: '#/components/schemas/EstadoEquipo'
+        capitanId: { type: integer }
+        capitanPropuestoId:
+          type: integer
+          nullable: true
+          description: Miembro al que se le propuso la capitanía (HU-21.2), si hay propuesta pendiente.
+        inasistencias:
+          type: integer
+          description: Inasistencias registradas (RN-08).
+        suspendidoHasta:
+          type: string
+          format: date-time
+          nullable: true
+          description: RN-08. Mientras sea futura, el equipo no puede publicar ni postularse en Busca Partido.
+        fechaCreacion: { type: string, format: date-time }
+        totalMiembros: { type: integer }
+    EquipoEnvuelto:
+      type: object
+      required: [equipo]
+      properties:
+        equipo:
+          $ref: '#/components/schemas/Equipo'
+    Miembro:
+      type: object
+      description: Datos públicos de un jugador en la plantilla. Nunca incluye correo ni celular (HU-04).
+      required: [usuarioId, username, nombre, fotoUrl, rolEnEquipo, fechaIngreso]
+      properties:
+        usuarioId: { type: integer }
+        username: { type: string, nullable: true }
+        nombre: { type: string, nullable: true }
+        fotoUrl: { type: string, nullable: true }
+        rolEnEquipo:
+          type: string
+          enum: [capitan, miembro]
+        fechaIngreso: { type: string, format: date-time }
+    EquipoDetalle:
+      type: object
+      required: [equipo, miembros, esMiembro, esCapitan]
+      properties:
+        equipo:
+          $ref: '#/components/schemas/Equipo'
+        miembros:
+          type: array
+          items:
+            $ref: '#/components/schemas/Miembro'
+        esMiembro:
+          type: boolean
+          description: Verdadero si hay sesión y el usuario está en la plantilla.
+        esCapitan:
+          type: boolean
+          description: Verdadero si hay sesión y el usuario es el capitán.
+    InvitarJugadorInput:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          example: maria_g
+    RespuestaInput:
+      type: object
+      required: [aceptar]
+      properties:
+        aceptar:
+          type: boolean
+    CederCapitaniaInput:
+      type: object
+      required: [usuarioId]
+      properties:
+        usuarioId:
+          type: integer
+          minimum: 1
+          description: Miembro del equipo al que se le propone la capitanía.
+    Invitacion:
+      type: object
+      required: [id, equipo, usuarioInvitado, porEnlace, estado, fecha]
+      properties:
+        id: { type: integer }
+        equipo:
+          type: object
+          required: [id, nombre, escudoUrl, nivel, tipoFutbol]
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+            escudoUrl: { type: string, nullable: true }
+            nivel:
+              $ref: '#/components/schemas/Nivel'
+            tipoFutbol:
+              $ref: '#/components/schemas/TipoFutbol'
+        usuarioInvitado:
+          type: object
+          nullable: true
+          description: '`null` en las invitaciones por enlace. Solo datos públicos.'
+          required: [id, username, nombre]
+          properties:
+            id: { type: integer }
+            username: { type: string, nullable: true }
+            nombre: { type: string, nullable: true }
+        porEnlace:
+          type: boolean
+        estado:
+          type: string
+          enum: [pendiente, aceptada, rechazada]
+        fecha: { type: string, format: date-time }
+      example:
+        id: 31
+        equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5 }
+        usuarioInvitado: { id: 15, username: maria_g, nombre: María Gómez }
+        porEnlace: false
+        estado: pendiente
+        fecha: '2026-11-09T15:30:00.000Z'
+    InvitacionesLista:
+      type: object
+      required: [invitaciones]
+      properties:
+        invitaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitacion'
+    EnlaceEquipo:
+      type: object
+      required: [token, validoPorDias]
+      properties:
+        token:
+          type: string
+          description: Token del enlace. Se muestra UNA sola vez (solo se guarda su hash SHA-256); si se pierde hay que crear otro.
+        validoPorDias:
+          type: integer
+          description: Días de vigencia del enlace (7).
+          example: 7
+    VistaEnlaceEquipo:
+      type: object
+      required: [equipo]
+      properties:
+        equipo:
+          type: object
+          description: Datos públicos del equipo (sin correo ni celular de nadie).
+          required: [id, nombre, escudoUrl, nivel, tipoFutbol, totalMiembros]
+          properties:
+            id: { type: integer }
+            nombre: { type: string }
+            escudoUrl: { type: string, nullable: true }
+            nivel:
+              $ref: '#/components/schemas/Nivel'
+            tipoFutbol:
+              $ref: '#/components/schemas/TipoFutbol'
+            totalMiembros: { type: integer }
+
+    # ---------------------------------------------------------- Busca Partido (Sprint 3)
+    ModalidadPartido:
+      type: string
+      enum: [busco_rival, faltan_jugadores, busco_partido_sin_cancha]
+    EstadoPartido:
+      type: string
+      enum: [buscando, rival_confirmado, completo, cancelado, jugado]
+    PartidoBaseInput:
+      type: object
+      required: [equipoId, nivelBuscado]
+      properties:
+        equipoId:
+          type: integer
+          minimum: 1
+          description: Equipo publicador; el usuario debe ser su capitán.
+        nivelBuscado:
+          $ref: '#/components/schemas/Nivel'
+        descripcion:
+          type: string
+          maxLength: 255
+    PublicarBuscoRivalInput:
+      allOf:
+        - $ref: '#/components/schemas/PartidoBaseInput'
+        - type: object
+          required: [modalidad, reservaId]
+          properties:
+            modalidad:
+              type: string
+              enum: [busco_rival]
+            reservaId:
+              type: integer
+              minimum: 1
+              description: Reserva propia, `confirmada` o `pagada` (RN-09).
+            aceptacionAutomatica:
+              type: boolean
+              default: false
+            porcentajePagoRival:
+              type: number
+              minimum: 0
+              maximum: 100
+              default: 50
+              description: HU-22.2. Porcentaje del precio de la reserva que paga el rival.
+    PublicarFaltanJugadoresInput:
+      allOf:
+        - $ref: '#/components/schemas/PartidoBaseInput'
+        - type: object
+          required: [modalidad, reservaId, cuposDisponibles]
+          properties:
+            modalidad:
+              type: string
+              enum: [faltan_jugadores]
+            reservaId:
+              type: integer
+              minimum: 1
+            cuposDisponibles:
+              type: integer
+              minimum: 1
+              description: RN-10. No puede superar 2 x tipo de fútbol (10 en fútbol 5).
+            posicionDeseada:
+              type: string
+              nullable: true
+              enum: [arquero, defensa, medio, delantero]
+              description: HU-25.1. Posición que busca el capitán (opcional).
+            aportePorJugador:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              default: 0
+              description: COP que aporta cada jugador.
+    PublicarSinCanchaInput:
+      allOf:
+        - $ref: '#/components/schemas/PartidoBaseInput'
+        - type: object
+          required: [modalidad, fechaPreferida, rangoHoraInicio, rangoHoraFin, zona]
+          properties:
+            modalidad:
+              type: string
+              enum: [busco_partido_sin_cancha]
+            fechaPreferida:
+              type: string
+              format: date
+              description: No puede haber pasado ya.
+            rangoHoraInicio:
+              $ref: '#/components/schemas/HoraEntrada'
+            rangoHoraFin:
+              allOf:
+                - $ref: '#/components/schemas/HoraEntrada'
+              description: Debe ser posterior a `rangoHoraInicio`.
+            zona:
+              type: string
+              maxLength: 100
+              example: Chapinero
+    PublicarPartidoInput:
+      description: Unión discriminada por `modalidad`.
+      oneOf:
+        - $ref: '#/components/schemas/PublicarBuscoRivalInput'
+        - $ref: '#/components/schemas/PublicarFaltanJugadoresInput'
+        - $ref: '#/components/schemas/PublicarSinCanchaInput'
+      discriminator:
+        propertyName: modalidad
+        mapping:
+          busco_rival: '#/components/schemas/PublicarBuscoRivalInput'
+          faltan_jugadores: '#/components/schemas/PublicarFaltanJugadoresInput'
+          busco_partido_sin_cancha: '#/components/schemas/PublicarSinCanchaInput'
+    PostularInput:
+      type: object
+      required: [equipoId]
+      properties:
+        equipoId:
+          type: integer
+          minimum: 1
+          description: Equipo que se postula como rival (el usuario debe ser su capitán).
+    AceptarConReservaInput:
+      type: object
+      required: [equipoId, reservaId]
+      properties:
+        equipoId:
+          type: integer
+          minimum: 1
+          description: Equipo que acepta (el usuario debe ser su capitán).
+        reservaId:
+          type: integer
+          minimum: 1
+          description: Reserva propia que cae dentro de la fecha y el rango pedidos.
+    InscribirseInput:
+      type: object
+      properties:
+        posicion:
+          allOf:
+            - $ref: '#/components/schemas/Posicion'
+          type: string
+          nullable: true
+          default: null
+    EquipoResumen:
+      type: object
+      description: Resumen público de un equipo (sin datos de contacto).
+      required: [id, nombre, escudoUrl, nivel, tipoFutbol, fairPlay]
+      properties:
+        id: { type: integer }
+        nombre: { type: string }
+        escudoUrl: { type: string, nullable: true }
+        nivel: { type: string }
+        tipoFutbol:
+          $ref: '#/components/schemas/TipoFutbol'
+        fairPlay:
+          type: number
+          nullable: true
+          description: Reputación del equipo (HU-22.2); `null` si aún no tiene calificaciones.
+    Partido:
+      type: object
+      required: [id, modalidad, estado, nivelBuscado, descripcion, aceptacionAutomatica, porcentajePagoRival, cuposDisponibles, posicionDeseada, aportePorJugador, fechaPreferida, rangoHoraInicio, rangoHoraFin, zona, fechaPublicacion, equipoPublicador, equipoRival, reserva, valorPorEquipo]
+      properties:
+        id: { type: integer }
+        posicionDeseada:
+          type: string
+          nullable: true
+          enum: [arquero, defensa, medio, delantero]
+          description: Posición que busca el capitán en un partido `faltan_jugadores`; `null` si no indicó ninguna.
+        modalidad:
+          $ref: '#/components/schemas/ModalidadPartido'
+        estado:
+          $ref: '#/components/schemas/EstadoPartido'
+        nivelBuscado:
+          type: string
+        descripcion:
+          type: string
+          nullable: true
+        aceptacionAutomatica:
+          type: boolean
+        porcentajePagoRival:
+          type: number
+        cuposDisponibles:
+          type: integer
+          nullable: true
+          description: Solo en `faltan_jugadores`.
+        aportePorJugador:
+          type: integer
+          nullable: true
+          description: COP, solo en `faltan_jugadores`.
+        fechaPreferida:
+          type: string
+          format: date
+          nullable: true
+          description: Solo en `busco_partido_sin_cancha` (hasta que se confirma con una reserva).
+        rangoHoraInicio:
+          type: string
+          nullable: true
+        rangoHoraFin:
+          type: string
+          nullable: true
+        zona:
+          type: string
+          nullable: true
+        fechaPublicacion: { type: string, format: date-time }
+        equipoPublicador:
+          $ref: '#/components/schemas/EquipoResumen'
+        equipoRival:
+          allOf:
+            - $ref: '#/components/schemas/EquipoResumen'
+          type: object
+          nullable: true
+        reserva:
+          type: object
+          nullable: true
+          description: Datos de la cancha y el horario; `null` mientras el partido no tiene reserva.
+          required: [id, fecha, horaInicio, horaFin, tipoFutbol, cancha, complejo, precioTotal]
+          properties:
+            id: { type: integer }
+            fecha: { type: string, format: date }
+            horaInicio:
+              $ref: '#/components/schemas/Hora'
+            horaFin:
+              $ref: '#/components/schemas/Hora'
+            tipoFutbol:
+              $ref: '#/components/schemas/TipoFutbol'
+            cancha: { type: string }
+            complejo:
+              type: object
+              required: [id, nombre, ciudad, barrio, direccion]
+              properties:
+                id: { type: integer }
+                nombre: { type: string }
+                ciudad: { type: string }
+                barrio: { type: string }
+                direccion: { type: string }
+            precioTotal:
+              type: integer
+              description: COP.
+        valorPorEquipo:
+          type: object
+          nullable: true
+          description: HU-22.2. Valor a pagar por cada equipo (COP); `null` sin reserva o en `faltan_jugadores`.
+          required: [publicador, rival]
+          properties:
+            publicador: { type: integer }
+            rival: { type: integer }
+      example:
+        id: 18
+        modalidad: busco_rival
+        estado: buscando
+        nivelBuscado: intermedio
+        descripcion: Partido amistoso
+        aceptacionAutomatica: false
+        porcentajePagoRival: 50
+        cuposDisponibles: null
+        aportePorJugador: null
+        fechaPreferida: null
+        rangoHoraInicio: null
+        rangoHoraFin: null
+        zona: null
+        fechaPublicacion: '2026-11-09T16:00:00.000Z'
+        equipoPublicador: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, fairPlay: 4.5 }
+        equipoRival: null
+        reserva: { id: 42, fecha: '2026-11-20', horaInicio: '19:00', horaFin: '20:00', tipoFutbol: 5, cancha: 'Cancha 1', complejo: { id: 3, nombre: Golazo, ciudad: Bogotá, barrio: Chapinero, direccion: 'Cra 7 # 50-10' }, precioTotal: 100000 }
+        valorPorEquipo: { publicador: 50000, rival: 50000 }
+    PartidoEnvuelto:
+      type: object
+      required: [partido]
+      properties:
+        partido:
+          $ref: '#/components/schemas/Partido'
+    PartidosLista:
+      type: object
+      required: [partidos]
+      properties:
+        partidos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Partido'
+    PartidoDetalle:
+      type: object
+      required: [partido, ultimosResultados, esCapitanPublicador, miPostulacion, miInscripcion]
+      properties:
+        partido:
+          $ref: '#/components/schemas/Partido'
+        miPostulacion:
+          type: object
+          nullable: true
+          description: Postulación de un equipo que capitanea el usuario, o `null`.
+          required: [id, equipoId, estado]
+          properties:
+            id: { type: integer }
+            equipoId: { type: integer }
+            estado: { type: string }
+        miInscripcion:
+          type: object
+          nullable: true
+          description: Solicitud de cupo del usuario, o `null`.
+          required: [id, estado, posicion]
+          properties:
+            id: { type: integer }
+            estado: { type: string }
+            posicion: { type: string, nullable: true }
+        ultimosResultados:
+          type: array
+          description: Últimos resultados del equipo publicador, desde su punto de vista.
+          items:
+            type: object
+            required: [partidoId, golesPropios, golesRival, fecha]
+            properties:
+              partidoId: { type: integer }
+              golesPropios: { type: integer, nullable: true }
+              golesRival: { type: integer, nullable: true }
+              fecha:
+                type: string
+                format: date-time
+                description: Fecha de publicación del partido.
+        esCapitanPublicador:
+          type: boolean
+          description: Verdadero si hay sesión y el usuario es el capitán del equipo publicador.
+    Postulacion:
+      type: object
+      required: [id, partidoId, equipo, estado, fecha]
+      properties:
+        id: { type: integer }
+        partidoId: { type: integer }
+        equipo:
+          $ref: '#/components/schemas/EquipoResumen'
+        estado:
+          type: string
+          enum: [pendiente, aceptada, rechazada, anulada]
+        fecha: { type: string, format: date-time }
+    ResultadoPostulacion:
+      type: object
+      required: [postulacionId, confirmado, partido]
+      properties:
+        postulacionId: { type: integer }
+        confirmado:
+          type: boolean
+          description: Verdadero si el partido tiene aceptación automática y el rival quedó confirmado.
+        partido:
+          $ref: '#/components/schemas/Partido'
+    Inscripcion:
+      type: object
+      required: [id, partidoId, usuarioId, jugador, posicion, estado, fecha]
+      properties:
+        id: { type: integer }
+        partidoId: { type: integer }
+        usuarioId: { type: integer }
+        jugador:
+          type: object
+          description: Solo datos públicos (sin correo ni celular).
+          required: [username, nombre, fotoUrl]
+          properties:
+            username: { type: string, nullable: true }
+            nombre: { type: string, nullable: true }
+            fotoUrl: { type: string, nullable: true }
+        posicion:
+          allOf:
+            - $ref: '#/components/schemas/Posicion'
+          type: string
+          nullable: true
+        estado:
+          type: string
+          enum: [pendiente, aceptada, rechazada]
+        fecha: { type: string, format: date-time }
+    InscripcionCreada:
+      type: object
+      required: [id, partidoId, estado, posicion, aporte]
+      properties:
+        id: { type: integer }
+        partidoId: { type: integer }
+        estado:
+          type: string
+          enum: [pendiente, aceptada, rechazada]
+        posicion:
+          allOf:
+            - $ref: '#/components/schemas/Posicion'
+          type: string
+          nullable: true
+        aporte:
+          type: integer
+          nullable: true
+          description: COP que debe aportar el jugador.

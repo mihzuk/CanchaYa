@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { pool } from '../shared/database/pool';
 import { logger } from '../shared/logger/logger';
 import { expirarReservasJob } from './expirar-reservas.job';
+import { sincronizarPartidosJob } from './sincronizar-partidos.job';
 import type { Tarea } from './tarea';
 
 export type { Tarea } from './tarea';
@@ -40,7 +41,7 @@ export async function ejecutarTarea(tarea: Tarea, ahora = new Date()): Promise<b
 
 /** Registra y arranca las tareas. Devuelve una función para detenerlas (cierre ordenado). */
 export async function iniciarTareas(): Promise<() => void> {
-  const tareas: Tarea[] = [expirarReservasJob];
+  const tareas: Tarea[] = [expirarReservasJob, sincronizarPartidosJob];
   const enCurso = new Set<string>();
   const temporizadores = tareas.map((t) =>
     setInterval(() => {

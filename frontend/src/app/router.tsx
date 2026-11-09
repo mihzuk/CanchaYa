@@ -16,6 +16,13 @@ import { AvailabilityPage } from '../features/bookings/pages/AvailabilityPage';
 import { BookingPage } from '../features/bookings/pages/BookingPage';
 import { MyBookingsPage } from '../features/bookings/pages/MyBookingsPage';
 import { VenueBookingsPage } from '../features/bookings/pages/VenueBookingsPage';
+import { MatchDetailPage } from '../features/matchmaking/pages/MatchDetailPage';
+import { OpenMatchesPage } from '../features/matchmaking/pages/OpenMatchesPage';
+import { PublishMatchPage } from '../features/matchmaking/pages/PublishMatchPage';
+import { CreateTeamPage } from '../features/teams/pages/CreateTeamPage';
+import { JoinTeamPage } from '../features/teams/pages/JoinTeamPage';
+import { MyTeamsPage } from '../features/teams/pages/MyTeamsPage';
+import { TeamPage } from '../features/teams/pages/TeamPage';
 import { PaymentPage } from '../features/payments/pages/PaymentPage';
 import { RefundsPage } from '../features/payments/pages/RefundsPage';
 import { VenuePaymentsPage } from '../features/payments/pages/VenuePaymentsPage';
@@ -98,12 +105,29 @@ const rutasReservas: RouteObject[] = [
   { path: 'mis-complejos/:id/reembolsos', element: gestor(<RefundsPage />) },
 ];
 
+// EP-05 · Equipos
+const rutasEquipos: RouteObject[] = [
+  { path: 'mis-equipos', element: privada(<MyTeamsPage />) },
+  { path: 'equipos/crear', element: privada(<CreateTeamPage />) },
+  { path: 'equipos/:id', element: <TeamPage /> },
+  { path: 'unirse/:token', element: <JoinTeamPage /> },
+];
+
+// EP-06 · Busca Partido
+const rutasPartidos: RouteObject[] = [
+  { path: 'partidos', element: <OpenMatchesPage /> },
+  { path: 'partidos/publicar', element: privada(<PublishMatchPage />) },
+  { path: 'partidos/:id', element: <MatchDetailPage /> },
+];
+
 const hijas: RouteObject[] = [
   ...rutasGenerales,
   ...rutasAuth,
   ...rutasVenues,
   ...rutasAdminComplejo,
   ...rutasReservas,
+  ...rutasEquipos,
+  ...rutasPartidos,
   { path: '*', element: <NotFoundPage /> },
 ];
 
