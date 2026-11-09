@@ -5,12 +5,16 @@ import express, { type Express } from 'express';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { parse as parseYaml } from 'yaml';
-import { authApi, authRoutes, iniciarModuloAuth, usuariosRoutes } from './modules/auth';
+import { authApi, authRoutes, iniciarModuloAuth, registrarContribuyentePerfil, usuariosRoutes } from './modules/auth';
 import { bookingsRoutes, iniciarModuloBookings, registrarResolverNombres } from './modules/bookings';
+import { iniciarModuloMatchmaking, matchmakingRoutes, registrarDirectorioJugadores } from './modules/matchmaking';
 import { paymentsRoutes } from './modules/payments';
+import { registrarDirectorioUsuarios, teamsApi, teamsRoutes } from './modules/teams';
 import { venuesRoutes } from './modules/venues';
 import { env } from './shared/config/env';
 import { pool } from './shared/database/pool';
+import { endpointParaLog } from './shared/http/validar';
+import { AppError } from './shared/errors/AppError';
 import { errorHandler, notFoundHandler } from './shared/middleware/errorHandler';
 import { logger } from './shared/logger/logger';
 
@@ -18,11 +22,21 @@ import { logger } from './shared/logger/logger';
  * Construye la app Express (se separa de main.ts para poder probarla con supertest).
  * Orden: seguridad → parseo → log → rutas de cada módulo → 404 → manejo de errores.
  */
+let perfilConectado = false;
+
 export function createApp(): Express {
   iniciarModuloAuth();
   iniciarModuloBookings();
   // Composición: bookings muestra al administrador el nombre de los jugadores sin depender de auth.
   registrarResolverNombres((ids) => authApi.nombresDeUsuarios(ids));
+  iniciarModuloMatchmaking();
+  if (!perfilConectado) {
+    perfilConectado = true;
+    registrarContribuyentePerfil(async (id) => ({ equipos: await teamsApi.equiposDeUsuario(id) })); // HU-04.2
+  }
+  // Composición: teams y matchmaking leen datos públicos de usuarios sin depender de auth.
+  registrarDirectorioUsuarios({ porUsername: authApi.usuarioPublicoPorUsername, porIds: authApi.usuariosPublicos });
+  registrarDirectorioJugadores(authApi.usuariosPublicos);
 
   const app = express();
   app.disable('x-powered-by');
@@ -53,13 +67,20 @@ export function createApp(): Express {
     }),
   );
   app.use(express.json({ limit: '100kb' }));
+  // PostgreSQL no admite el carácter NUL en un texto: se rechaza aquí con un 400 claro.
+  app.use((req, _res, next) => {
+    if (JSON.stringify(req.body ?? '').includes('\\u0000') || req.originalUrl.includes('%00')) {
+      throw new AppError(400, 'CARACTER_INVALIDO', 'La petición contiene caracteres no permitidos.');
+    }
+    next();
+  });
 
   // HT-14: una línea por petición con fecha, endpoint, estado, duración y usuario.
   app.use((req, res, next) => {
     const inicio = process.hrtime.bigint();
     res.on('finish', () => {
       logger.info('peticion', {
-        endpoint: `${req.method} ${req.originalUrl.split('?')[0]}`,
+        endpoint: endpointParaLog(req),
         estado: res.statusCode,
         ms: Number((process.hrtime.bigint() - inicio) / 1_000_000n),
         usuarioId: req.usuario?.id ?? null,
@@ -82,6 +103,8 @@ export function createApp(): Express {
   app.use('/api', venuesRoutes);
   app.use('/api', bookingsRoutes);
   app.use('/api', paymentsRoutes);
+  app.use('/api', teamsRoutes);
+  app.use('/api', matchmakingRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

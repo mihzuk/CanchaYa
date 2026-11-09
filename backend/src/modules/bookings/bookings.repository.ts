@@ -175,6 +175,12 @@ export const bookingsRepository = {
     return filas.map((f) => aDto(f));
   },
 
+  /** Varias reservas por id (cualquier complejo), para Busca Partido. */
+  async porIds(ids: number[], db?: Queryable): Promise<ReservaInterna[]> {
+    if (!ids.length) return [];
+    return (await query<ReservaFila>(`${SELECT_RESERVA} WHERE r.id = ANY($1::bigint[])`, [ids], db)).map((f) => aDto(f));
+  },
+
   /** Reservas de un complejo (cualquier estado) en un rango de fechas o por ids, para pagos y reportes. */
   async deComplejo(complejoId: number, f: { desde?: string; hasta?: string; ids?: number[] } = {}): Promise<ReservaInterna[]> {
     const condiciones = ['c.id = $1'];

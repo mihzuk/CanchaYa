@@ -157,6 +157,16 @@ export const authRepository = {
     return new Map(filas.map((f) => [f.id, f.nombre]));
   },
 
+  /** Datos públicos de varios usuarios activos (sin correo ni celular). */
+  async publicos(ids: number[]): Promise<Map<number, { id: number; username: string; nombre: string; fotoUrl: string | null }>> {
+    if (!ids.length) return new Map();
+    const filas = await query<{ id: number; username: string; nombre: string; fotoUrl: string | null }>(
+      `SELECT id, username, nombres || ' ' || apellidos AS nombre, foto_url AS "fotoUrl" FROM usuario WHERE id = ANY($1::bigint[]) AND estado <> 'desactivado'`,
+      [ids],
+    );
+    return new Map(filas.map((f) => [f.id, f]));
+  },
+
   /** Promueve a AdminComplejo solo si hoy es Jugador (no degrada a un Superadmin). */
   async promoverAAdminComplejo(id: number): Promise<void> {
     await query(

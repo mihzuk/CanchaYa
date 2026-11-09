@@ -26,4 +26,11 @@ export const authApi = {
   obtenerUsuario: (id: number) => authService.obtenerUsuario(id),
   /** Nombres visibles (sin datos de contacto) de varios usuarios. */
   nombresDeUsuarios: (ids: number[]) => authRepository.nombres(ids),
+  /** Datos públicos (sin contacto) para plantillas e inscripciones. */
+  usuariosPublicos: (ids: number[]) => authRepository.publicos(ids),
+  async usuarioPublicoPorUsername(username: string) {
+    const u = await authRepository.buscarPorUsername(username);
+    if (!u || u.estado !== 'activo') return undefined;
+    return { id: u.id, username: u.username, nombre: `${u.nombres} ${u.apellidos}`, fotoUrl: u.foto_url };
+  },
 };
