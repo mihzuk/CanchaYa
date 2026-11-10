@@ -36,6 +36,9 @@ function Contenido({ reserva, onCerrar }: { reserva: Reserva; onCerrar: () => vo
     void qc.invalidateQueries({ queryKey: ['reserva'] });
     void qc.invalidateQueries({ queryKey: ['disponibilidad'] });
     void qc.invalidateQueries({ queryKey: ['disponibilidad-complejo'] });
+    void qc.invalidateQueries({ queryKey: ['partidos'] });
+    void qc.invalidateQueries({ queryKey: ['partido'] });
+    void qc.invalidateQueries({ queryKey: ['notificaciones'] });
   }
 
   const cancelar = useMutation({
@@ -93,6 +96,18 @@ function Contenido({ reserva, onCerrar }: { reserva: Reserva; onCerrar: () => vo
             Política: más de 24 h antes, 100 %; entre 6 y 24 h, 50 %; con menos de 6 h, sin reembolso.
           </p>
         </>
+      )}
+      {preview.isSuccess && preview.data.partidoAfectado && (
+        <Alert tone="warning">
+          <strong>Esta reserva tiene un partido publicado en Busca Partido.</strong> Si la cancelas, se cancelará el partido
+          {preview.data.partidoAfectado.equipoRival ? (
+            <>
+              , se avisará al equipo rival ({preview.data.partidoAfectado.equipoRival}) y se le devolverá el 100 % de lo que haya pagado.
+            </>
+          ) : (
+            '.'
+          )}
+        </Alert>
       )}
       {error && <Alert tone="error" onClose={() => setError(null)}>{error}</Alert>}
 

@@ -50,6 +50,7 @@ export interface ComplejoBusqueda {
   direccion: string;
   fotoPrincipal: string | null;
   distanciaKm: number | null;
+  calificacion: { promedio: number; total: number } | null;
 }
 export interface ResultadoBusqueda {
   complejo: ComplejoBusqueda;
@@ -106,4 +107,5 @@ export interface PrevisualizacionCancelacion {
   totalPagado: number;
   valorReembolso: number;
   puedeReprogramar: boolean;
+  partidoAfectado?: { id: number; estado: string; equipoRival: string | null } | null;
 }

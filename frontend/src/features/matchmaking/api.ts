@@ -1,5 +1,5 @@
 import { api } from '../../lib/api';
-import type { DetallePartido, FiltrosPartidos, Inscripcion, Partido, Postulacion, PosicionJugador, PublicarInput } from './types';
+import type { Marcador, DetallePartido, FiltrosPartidos, Inscripcion, Partido, Postulacion, PosicionJugador, PublicarInput } from './types';
 
 function qs(params: Record<string, string>): string {
   const u = new URLSearchParams();
@@ -29,3 +29,6 @@ export const inscribirse = (id: number, posicion: PosicionJugador | null) =>
   api.post<{ inscripcion: Inscripcion }>(`/partidos/${id}/inscripciones`, { posicion });
 export const listarInscripciones = (id: number) => api.get<{ inscripciones: Inscripcion[] }>(`/partidos/${id}/inscripciones`);
 export const responderInscripcion = (id: number, aceptar: boolean) => api.post<void>(`/inscripciones/${id}/respuesta`, { aceptar });
+
+export const registrarMarcador = (id: number, d: { equipoId: number; golesPublicador: number; golesRival: number }) =>
+  api.post<Marcador>(`/partidos/${id}/marcador`, d);

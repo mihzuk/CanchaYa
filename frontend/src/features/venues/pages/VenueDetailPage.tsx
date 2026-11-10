@@ -6,6 +6,8 @@ import { ApiError } from '../../../lib/api';
 import { formatHora, hoyBogota } from '../../../lib/format';
 import { disponibilidadComplejo } from '../../bookings/api';
 import { rutaReservar } from '../../bookings/pages/AvailabilityPage';
+import { StarRatingDisplay } from '../../ratings/components/StarRating';
+import { VenueReviews } from '../../ratings/components/VenueReviews';
 import { obtenerComplejo } from '../api';
 import { CourtCard } from '../components/CourtCard';
 import { SlotGrid, SlotLegend } from '../components/SlotGrid';
@@ -107,7 +109,7 @@ export function VenueDetailPage() {
     );
   }
 
-  const { complejo, canchas, horarios, esGestor } = consulta.data;
+  const { complejo, canchas, horarios, esGestor, calificacion } = consulta.data;
   const activas = canchas.filter((c) => c.estado === 'activa');
 
   return (
@@ -121,6 +123,9 @@ export function VenueDetailPage() {
           {complejo.direccion}, {complejo.barrio}, {complejo.ciudad}
           <br />
           Teléfono: <a href={`tel:${complejo.telefono}`}>{complejo.telefono}</a>
+        </p>
+        <p>
+          <StarRatingDisplay resumen={calificacion ?? null} />
         </p>
         {esGestor && (
           <Link className="btn btn--secondary" to={`/mis-complejos/${complejo.id}`}>
@@ -176,6 +181,8 @@ export function VenueDetailPage() {
           <Disponibilidad complejoId={complejo.id} fecha={fecha} />
         </section>
       )}
+
+      <VenueReviews complejoId={complejo.id} />
     </div>
   );
 }

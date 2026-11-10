@@ -37,3 +37,7 @@ export const cancelarReserva = (id: number, motivo?: string) =>
   api.post<{ reserva: Reserva; porcentajeReembolso: number; valorReembolso: number }>(`/reservas/${id}/cancelar`, motivo ? { motivo } : {});
 export const reprogramarReserva = (id: number, d: { fecha: string; horaInicio: string; canchaId: number }) =>
   api.post<{ reserva: Reserva; excedenteReembolsado: number }>(`/reservas/${id}/reprogramar`, d);
+
+/** El administrador del complejo mueve una reserva; el motivo es obligatorio y al cliente nunca se le cobra más. */
+export const moverReserva = (id: number, d: { fecha: string; horaInicio: string; canchaId: number; motivo: string }) =>
+  api.post<{ reserva: Reserva; excedenteReembolsado?: number }>(`/reservas/${id}/reprogramar`, d);

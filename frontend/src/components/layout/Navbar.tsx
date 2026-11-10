@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
+import { NotificationBell } from '../../features/notifications/components/NotificationBell';
 
 export function Navbar() {
   const { usuario, cerrarSesion } = useAuth();
@@ -43,6 +44,7 @@ export function Navbar() {
           {usuario?.rol === 'Superadmin' && <NavLink to="/admin/complejos">Aprobar complejos</NavLink>}
           {usuario ? (
             <>
+              <NotificationBell />
               <NavLink to="/perfil">Mi perfil</NavLink>
               <button type="button" className="navbar__link-btn" onClick={() => void salir()}>
                 Salir

@@ -96,6 +96,15 @@ export function MyBookingsPage() {
                         Publicar en Busca Partido
                       </Link>
                     )}
+                    {r.estado === 'completada' ? (
+                      <Link className="btn btn--primary" to={`/reservas/${r.id}`}>
+                        Calificar complejo
+                      </Link>
+                    ) : (
+                      <Link className="btn btn--ghost" to={`/reservas/${r.id}`}>
+                        Ver detalle
+                      </Link>
+                    )}
                     {ESTADOS_ACTIVOS.includes(r.estado) && (
                       <Button variant="secondary" onClick={() => setCancelando(r)}>
                         Cancelar o reprogramar

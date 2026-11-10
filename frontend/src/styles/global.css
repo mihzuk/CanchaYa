@@ -458,3 +458,37 @@ a.slot--link:hover { background: var(--color-brand); color: #fff; }
   .cal--grid { display: block; }
   .cal--list { display: none; }
 }
+
+/* Sprint 4 · notificaciones, calificaciones y pago dividido */
+.bell { position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); min-width: var(--tap); color: #fff; border-radius: var(--radius); text-decoration: none; }
+.bell:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+.bell__count { position: absolute; top: 4px; right: 2px; min-width: 1.15rem; height: 1.15rem; padding: 0 0.25rem; border-radius: 999px; background: #fff; color: var(--color-danger); font-size: 0.7rem; font-weight: 800; line-height: 1.15rem; text-align: center; }
+
+.notif-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.notif { width: 100%; display: flex; flex-direction: column; gap: var(--space-1); text-align: left; min-height: var(--tap); padding: var(--space-3) var(--space-4); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); font: inherit; color: inherit; cursor: pointer; }
+.notif:hover { border-color: var(--color-brand); }
+.notif--nueva { background: var(--color-info-bg); border-color: var(--color-info); }
+.notif__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.notif__fecha { font-size: var(--fs-sm); }
+
+.days-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: var(--space-1) var(--space-3); }
+
+.stars-field { border: 0; margin: 0; padding: 0; min-width: 0; }
+.stars-field legend { font-weight: 700; padding: 0; margin-bottom: var(--space-1); }
+.stars { display: inline-flex; gap: var(--space-1); }
+.stars__star { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--tap); height: var(--tap); font-size: 1.9rem; line-height: 1; color: var(--color-muted); cursor: pointer; }
+.stars__star.is-on { color: #b36b00; }
+.stars__star input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.stars__star:has(input:focus-visible) { outline: 3px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius); }
+.stars-display { display: inline-flex; align-items: center; gap: var(--space-1); }
+.stars-display__icons { color: var(--color-muted); letter-spacing: 0.05em; }
+.stars-display__icons .is-on { color: #b36b00; }
+.venue-card__rating { margin: 0; font-size: var(--fs-sm); }
+
+.reviews { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.review { padding: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); }
+.review p { margin: var(--space-2) 0 0; }
+
+.summary-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-3); margin: 0; }
+.summary-list dt { color: var(--color-muted); font-size: var(--fs-sm); }
+.summary-list dd { margin: 0; font-weight: 700; font-size: var(--fs-lg); }
