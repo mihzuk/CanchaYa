@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fechaLegible,
   diaSemanaIso,
   esFechaValida,
   esHoraValida,
@@ -55,5 +56,16 @@ describe('pesos colombianos', () => {
     expect(porcentajeDe(80000, 50)).toBe(40000);
     expect(porcentajeDe(75000, 33.33)).toBe(24998);
     expect(formatearCOP(120000).replace(/\s/g, ' ')).toMatch(/120\.000/);
+  });
+});
+
+describe('fechaLegible (mensajes al usuario)', () => {
+  it('muestra día de la semana y mes sin desfase de zona horaria', () => {
+    expect(fechaLegible('2026-11-26')).toBe('jue, 26 de nov');
+    expect(fechaLegible('2026-01-04')).toBe('dom, 4 de ene');
+  });
+  it('tolera valores vacíos o inválidos', () => {
+    expect(fechaLegible(null)).toBe('');
+    expect(fechaLegible('no-fecha')).toBe('no-fecha');
   });
 });

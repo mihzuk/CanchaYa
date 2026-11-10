@@ -57,3 +57,17 @@ export interface PagoRespuesta {
 export function nombreCancha(r: ReservaResumen): string {
   return typeof r.cancha === 'string' ? r.cancha : r.cancha.nombre;
 }
+
+export interface ResumenPagoDividido {
+  precioTotal: number;
+  totalPagado: number;
+  saldoPendiente: number;
+  equipoDueno: { equipoId: number; parte: number; pagado: number };
+  equipoRival: { equipoId: number; parte: number; abono: number; pagado: number; limitePago: string | null } | null;
+}
+
+export interface RetiroRival {
+  porcentajeReembolso: number;
+  valorReembolso: number;
+  cancelacionTardia: boolean;
+}

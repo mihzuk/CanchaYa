@@ -81,6 +81,7 @@ export interface UltimoResultado {
 export interface DetallePartido {
   partido: Partido;
   ultimosResultados: UltimoResultado[];
+  marcador: Marcador | null;
   esCapitanPublicador: boolean;
   miPostulacion: { id: number; equipoId: number; estado: 'pendiente' | 'aceptada' | 'rechazada' } | null;
   miInscripcion: { id: number; estado: 'pendiente' | 'aceptada' | 'rechazada'; posicion: string | null } | null;
@@ -146,3 +147,11 @@ export type PublicarInput =
       rangoHoraFin: string;
       zona: string;
     };
+
+export interface Marcador {
+  golesPublicador: number;
+  golesRival: number;
+  confirmadoPublicador: boolean;
+  confirmadoRival: boolean;
+  confirmado: boolean;
+}

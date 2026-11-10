@@ -1,3 +1,4 @@
+import { StarRatingDisplay } from '../../ratings/components/StarRating';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Alert, Card, Spinner } from '../../../components/ui';
@@ -65,6 +66,7 @@ export function AvailabilityPage() {
                       {r.complejo.direccion}, {r.complejo.barrio}, {r.complejo.ciudad}
                       {r.complejo.distanciaKm !== null && <> · A {r.complejo.distanciaKm.toFixed(1)} km</>}
                     </p>
+                    <StarRatingDisplay resumen={r.complejo.calificacion} compacto />
                     {r.precioDesde !== null && <p className="venue-card__price">Desde {formatCOP(r.precioDesde)}</p>}
                     {r.canchas.map((c) => (
                       <div key={c.id} className="stack stack--wide">

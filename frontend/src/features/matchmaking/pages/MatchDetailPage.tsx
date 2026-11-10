@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { Alert, Badge, Button, Card, Modal, Select, Spinner } from '../../../components/ui';
+import { Alert, Badge, Button, Card, Input, Modal, Select, Spinner } from '../../../components/ui';
 import { ApiError } from '../../../lib/api';
 import { formatCOP, formatFecha, formatHora } from '../../../lib/format';
 import { useAuth } from '../../auth/AuthContext';
@@ -18,14 +18,17 @@ import {
   listarPostulaciones,
   obtenerPartido,
   postularEquipo,
+  registrarMarcador,
   responderInscripcion,
   responderPostulacion,
   retirarInscripcion,
   retirarPostulacion,
 } from '../api';
+import { SplitPaymentSummary } from '../../payments/components/SplitPaymentSummary';
+import { FairPlayForm } from '../../ratings/components/FairPlayForm';
 import { textoFairPlay } from '../components/OpenMatchCard';
 import { ETIQUETA_ESTADO, POSICIONES, etiquetaModalidad } from '../types';
-import type { DetallePartido, EquipoResumen, Partido, PosicionJugador } from '../types';
+import type { DetallePartido, EquipoResumen, Marcador, Partido, PosicionJugador } from '../types';
 
 const MENSAJES: Record<string, string> = {
   CRUCE_DE_HORARIO: 'Tu equipo ya tiene otro partido o reserva en ese horario.',
@@ -36,6 +39,8 @@ const MENSAJES: Record<string, string> = {
   EQUIPO_SUSPENDIDO: 'Tu equipo está suspendido y no puede participar en partidos por ahora.',
   YA_INSCRITO: 'Ya pediste un cupo en este partido.',
   YA_ES_MIEMBRO: 'Ya eres miembro del equipo publicador.',
+  MARCADOR_CONFIRMADO: 'El marcador ya fue confirmado por los dos capitanes y no puede cambiarse.',
+  PARTIDO_NO_JUGADO: 'El marcador se registra cuando el partido ya se jugó.',
   RESERVA_FUERA_DE_RANGO: 'Tu reserva está fuera de la fecha u horario que busca el equipo.',
 };
 
@@ -66,6 +71,8 @@ function useRefrescarPartido(id: number) {
       qc.invalidateQueries({ queryKey: ['inscripciones', id] }),
       qc.invalidateQueries({ queryKey: ['mis-reservas'] }),
       qc.invalidateQueries({ queryKey: ['equipo-partidos'] }),
+      qc.invalidateQueries({ queryKey: ['resumen-pago', id] }),
+      qc.invalidateQueries({ queryKey: ['notificaciones'] }),
     ]);
 }
 
@@ -351,6 +358,65 @@ function CancelarPartido({ partido }: { partido: Partido }) {
   );
 }
 
+function MarcadorPartido({ partido, equipoPropioId, inicial }: { partido: Partido; equipoPropioId: number; inicial: Marcador | null }) {
+  const refrescar = useRefrescarPartido(partido.id);
+  const [golesPub, setGolesPub] = useState(inicial ? String(inicial.golesPublicador) : '');
+  const [golesRiv, setGolesRiv] = useState(inicial ? String(inicial.golesRival) : '');
+  const [errorLocal, setErrorLocal] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: () => registrarMarcador(partido.id, { equipoId: equipoPropioId, golesPublicador: Number(golesPub), golesRival: Number(golesRiv) }),
+    onSuccess: refrescar,
+  });
+  const marcador: Marcador | null = m.data ?? inicial;
+  const valido = (v: string) => /^\d{1,2}$/.test(v);
+  const rival = partido.equipoRival;
+  const soyPublicador = equipoPropioId === partido.equipoPublicador.id;
+  const confirmadoPropio = marcador ? (soyPublicador ? marcador.confirmadoPublicador : marcador.confirmadoRival) : false;
+  return (
+    <Card className="stack">
+      <h2>Marcador</h2>
+      {marcador && (
+        <Alert tone={marcador.confirmado ? 'success' : 'info'}>
+          <strong>{`${partido.equipoPublicador.nombre} ${marcador.golesPublicador} - ${marcador.golesRival} ${rival?.nombre ?? 'Rival'}`}</strong>
+          {'. '}
+          {marcador.confirmado
+            ? 'Marcador confirmado por los dos capitanes.'
+            : confirmadoPropio
+              ? 'Falta que el capitán del otro equipo confirme el mismo marcador.'
+              : 'Registrado. Falta la confirmación del otro capitán.'}
+        </Alert>
+      )}
+      {m.isError && <Alert tone="error">{mensajeAccion(m.error)}</Alert>}
+      {errorLocal && <Alert tone="error">{errorLocal}</Alert>}
+      {!marcador?.confirmado && (
+        <form
+          className="form"
+          noValidate
+          aria-label="Registrar marcador"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!valido(golesPub) || !valido(golesRiv)) {
+              setErrorLocal('Ingresa los goles de cada equipo como números enteros entre 0 y 99.');
+              return;
+            }
+            setErrorLocal(null);
+            m.mutate();
+          }}
+        >
+          <p className="muted">Cada capitán registra el marcador; queda firme cuando los dos coinciden.</p>
+          <div className="form__row">
+            <Input label={`Goles de ${partido.equipoPublicador.nombre}`} type="number" inputMode="numeric" min={0} max={99} value={golesPub} onChange={(e) => setGolesPub(e.target.value)} required />
+            <Input label={`Goles de ${rival?.nombre ?? 'el rival'}`} type="number" inputMode="numeric" min={0} max={99} value={golesRiv} onChange={(e) => setGolesRiv(e.target.value)} required />
+          </div>
+          <Button type="submit" loading={m.isPending}>
+            Guardar marcador
+          </Button>
+        </form>
+      )}
+    </Card>
+  );
+}
+
 export function MatchDetailPage() {
   const { id } = useParams();
   const partidoId = Number(id);
@@ -385,6 +451,8 @@ export function MatchDetailPage() {
   const r = p.reserva;
   const capitaneados = (equipos.data?.equipos ?? []).filter((e) => e.capitanId === usuario?.id && e.estado === 'activo');
   const abierto = p.estado === 'buscando';
+  const equipoPropio = capitaneados.find((e) => e.id === p.equipoPublicador.id || e.id === p.equipoRival?.id) ?? null;
+  const rivalDelPropio = equipoPropio ? (equipoPropio.id === p.equipoPublicador.id ? p.equipoRival : p.equipoPublicador) : null;
 
   return (
     <div className="page stack stack--wide">
@@ -488,6 +556,28 @@ export function MatchDetailPage() {
           {usuario && p.modalidad === 'busco_rival' && !miPostulacion && <Postular partido={p} equipos={capitaneados} />}
           {usuario && p.modalidad === 'faltan_jugadores' && (!miInscripcion || miInscripcion.estado === 'rechazada') && <PedirCupo partido={p} />}
           {usuario && p.modalidad === 'busco_partido_sin_cancha' && <AceptarConReserva partido={p} equipos={capitaneados} />}
+        </>
+      )}
+
+      {usuario && p.modalidad === 'busco_rival' && p.equipoRival && p.reserva && (
+        <SplitPaymentSummary
+          partidoId={p.id}
+          equiposCapitaneadosIds={capitaneados.map((e) => e.id)}
+          nombreDueno={p.equipoPublicador.nombre}
+          nombreRival={p.equipoRival.nombre}
+          estadoPartido={p.estado}
+        />
+      )}
+
+      {p.estado === 'jugado' && equipoPropio && (
+        <>
+          <MarcadorPartido partido={p} equipoPropioId={equipoPropio.id} inicial={consulta.data.marcador} />
+          {rivalDelPropio && (
+            <Card className="stack">
+              <h2>Califica al equipo rival</h2>
+              <FairPlayForm partidoId={p.id} equipoId={equipoPropio.id} nombreRival={rivalDelPropio.nombre} />
+            </Card>
+          )}
         </>
       )}
 

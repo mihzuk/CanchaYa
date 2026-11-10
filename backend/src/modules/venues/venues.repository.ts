@@ -201,7 +201,7 @@ export const venuesRepository = {
    */
   async listarComplejos(
     f: Partial<FiltrosComplejos> & { adminId?: number; estado?: EstadoComplejo },
-  ): Promise<{ complejos: ComplejoResumenDto[]; total: number }> {
+  ): Promise<{ complejos: Omit<ComplejoResumenDto, 'calificacion'>[]; total: number }> {
     const condiciones: string[] = [];
     const params: unknown[] = [];
     const p = (v: unknown) => {
@@ -226,7 +226,7 @@ export const venuesRepository = {
     const desplazamiento = ((f.pagina ?? 1) - 1) * tamano;
 
     const total = await queryOne<{ total: number }>(`SELECT count(*)::int AS total FROM complejo c ${where}`, params);
-    const filas = await query<ComplejoResumenDto>(
+    const filas = await query<Omit<ComplejoResumenDto, 'calificacion'>>(
       `SELECT c.id, c.nombre, c.direccion, c.ciudad, c.barrio, c.estado, c.motivo_rechazo AS "motivoRechazo", c.fecha_creacion AS "fechaCreacion",
               (SELECT f.url FROM foto_complejo f WHERE f.complejo_id = c.id ORDER BY f.orden, f.id LIMIT 1) AS "fotoPrincipal",
               COALESCE((SELECT array_agg(s.nombre ORDER BY s.id) FROM complejo_servicio cs JOIN servicio s ON s.id = cs.servicio_id

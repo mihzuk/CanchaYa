@@ -9,3 +9,6 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+
+# Caché incremental de TypeScript
+*.tsbuildinfo

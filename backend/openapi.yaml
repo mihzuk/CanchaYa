@@ -45,13 +45,13 @@ tags:
     description: Equipos, invitaciones y capitanía (EP-05, HU-19 a HU-21).
 
   - name: Busca Partido   # EP-06
-    description: Partidos abiertos, postulaciones de rival, cupos de jugadores y reglas RN-08 a RN-11 (EP-06, HU-22 a HU-25).
+    description: Partidos abiertos, postulaciones de rival, cupos de jugadores, pago dividido, marcador y reglas RN-08 a RN-11 (EP-06, HU-22 a HU-26, HU-31.4).
 
   - name: Notificaciones  # EP-07
-    description: Pendiente.
+    description: Notificaciones en la plataforma y alertas de partidos compatibles (EP-07, HU-28, HU-29).
 
   - name: Calificaciones  # EP-08
-    description: Pendiente.
+    description: Calificación de complejos, calificación de equipos e inasistencias (EP-08, HU-30, HU-31).
 
   - name: Administración  # EP-09
     description: Pendiente.
@@ -1990,7 +1990,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PreviewCancelacion'
-              example: { horasDeAnticipacion: 30.5, porcentajeReembolso: 100, totalPagado: 40000, valorReembolso: 40000, puedeReprogramar: true }
+              example: { horasDeAnticipacion: 30.5, porcentajeReembolso: 100, totalPagado: 40000, valorReembolso: 40000, puedeReprogramar: true, partidoAfectado: { id: 12, estado: rival_confirmado, equipoRival: Los Tigres } }
         '400':
           $ref: '#/components/responses/Validacion'
         '401':
@@ -2063,7 +2063,9 @@ paths:
       tags: [Pagos]
       summary: Reprogramar una reserva a otra franja
       description: |
-        HU-12 (criterio 3) / RN-04, RN-06. Rol: solo el jugador dueño (otro usuario recibe 404). La reserva debe estar `confirmada` o `pagada` y faltar más de 24 horas. La reserva nueva siempre queda `confirmada` o `pagada`.
+        HU-12 (criterio 3) / RN-04, RN-06, HU-28.3. Roles: el jugador dueño, o el `AdminComplejo` del complejo / `Superadmin` (otro usuario recibe 404). La reserva debe estar `confirmada` o `pagada`.
+        El jugador solo puede reprogramar con más de 24 horas de anticipación; el administrador puede hacerlo hasta que empiece el partido (409 `PARTIDO_INICIADO` si ya empezó) y el `motivo` es obligatorio en ese caso (se le comunica al cliente).
+        Cuando lo hace el complejo, al cliente nunca se le cobra más: el precio nuevo es el menor entre el vigente y el de la reserva original. Lo pagado por el equipo rival de un partido asociado no se traslada: se le reembolsa completo. La reserva nueva siempre queda `confirmada` o `pagada`.
         Cancela la original (motivo `Reprogramada`) y crea una nueva en la franja pedida (mismo complejo; `canchaId` opcional, por defecto la misma cancha) con el precio vigente,
         trasladando lo ya pagado sin costo. Si lo pagado supera el nuevo precio, el excedente se reembolsa repartido entre los pagos, del más reciente al más antiguo (`excedenteReembolsado` es lo realmente reembolsado). Todo ocurre en una transacción:
         si la franja nueva falla, la original queda intacta. La nueva franja aplica las reglas de RN-06 (400: `FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`; 409: `FRANJA_BLOQUEADA`, `SIN_TARIFA`, `FRANJA_NO_DISPONIBLE`).
@@ -2085,7 +2087,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ResultadoReprogramacion'
         '400':
-          description: Datos inválidos (`VALIDACION`, incluida una cancha de otro complejo) o franja no reservable (`FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`).
+          description: Datos inválidos (`VALIDACION`, incluida una cancha de otro complejo o la falta del `motivo` cuando reprograma el complejo) o franja no reservable (`FECHA_PASADA`, `FUERA_DE_ANTICIPACION`, `FUERA_DE_HORARIO`).
           content:
             application/json:
               schema:
@@ -2109,7 +2111,7 @@ paths:
               example: { error: { codigo: RESERVA_NO_ENCONTRADA, mensaje: La reserva no existe } }
         '409':
           description: |
-            `ESTADO_INVALIDO` (no está confirmada ni pagada), `FUERA_DE_PLAZO` (faltan 24 horas o menos),
+            `ESTADO_INVALIDO` (no está confirmada ni pagada), `FUERA_DE_PLAZO` (faltan 24 horas o menos, solo para el jugador), `PARTIDO_INICIADO` (el complejo no puede mover una reserva que ya empezó),
             o la franja nueva no está libre (`FRANJA_NO_DISPONIBLE`, `FRANJA_BLOQUEADA`, `SIN_TARIFA`).
           content:
             application/json:
@@ -2288,7 +2290,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EquipoEnvuelto'
               example:
-                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
+                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, cancelacionesTardias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
         '400':
           $ref: '#/components/responses/Validacion'
         '401':
@@ -2355,7 +2357,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/EquipoDetalle'
               example:
-                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
+                equipo: { id: 7, nombre: Los Cracks, escudoUrl: null, nivel: intermedio, tipoFutbol: 5, estado: activo, capitanId: 12, capitanPropuestoId: null, inasistencias: 0, cancelacionesTardias: 0, suspendidoHasta: null, fechaCreacion: '2026-11-09T15:00:00.000Z', totalMiembros: 1 }
                 miembros:
                   - { usuarioId: 12, username: juanp, nombre: Juan Pérez, fotoUrl: null, rolEnEquipo: capitan, fechaIngreso: '2026-11-09T15:00:00.000Z' }
                 esMiembro: false
@@ -3338,6 +3340,198 @@ paths:
         '500':
           $ref: '#/components/responses/ErrorInterno'
 
+  /partidos/{id}/resumen-pago:
+    get:
+      operationId: resumenPagoPartido
+      tags: [Busca Partido]
+      summary: Resumen del pago dividido de un partido
+      description: |
+        HU-26. Solo los miembros de los dos equipos del partido y el administrador del complejo (o `Superadmin`). El partido debe tener reserva y no ser `faltan_jugadores`.
+        El valor se divide según `porcentajePagoRival`. En `busco_rival` el equipo que paga su parte es el rival; en `busco_partido_sin_cancha` la reserva es del rival y paga el publicador.
+        `equipoRival` (el equipo que debe su parte) es `null` mientras no hay rival confirmado.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Resumen de pagos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumenPagoPartido'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: No pertenece a ninguno de los equipos ni gestiona el complejo (`PROHIBIDO`) o la cuenta está inactiva (`CUENTA_INACTIVA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo los equipos del partido y el complejo pueden ver este resumen. } }
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: El partido no tiene pago dividido (`SIN_PAGO_DIVIDIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: SIN_PAGO_DIVIDIDO, mensaje: Este partido no tiene pago dividido. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/pago-rival:
+    post:
+      operationId: pagarParteRival
+      tags: [Busca Partido]
+      summary: Pagar la parte del equipo que debe su abono
+      description: |
+        HU-26.2 / HT-08. Solo el capitán del equipo deudor, con el partido en `rival_confirmado`. El pago debe hacerse dentro del plazo de pago del rival (parámetro global) y antes de que empiece el partido.
+        `valor` es opcional: por defecto lo que falta del abono de su parte (o, si el abono ya está cubierto, de su parte). Debe cubrir el abono mínimo y no superar la parte del equipo.
+        Pasarela simulada igual que en el abono de la reserva. Si el pago es rechazado responde 402 `PAGO_RECHAZADO` con el pago en `error.datos.pago`.
+        Si el plazo venció mientras se cobraba, se devuelve todo y responde 409 `PLAZO_VENCIDO`. Límite: 30 peticiones por hora por usuario.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PagoEnLineaInput'
+      responses:
+        '201':
+          description: Pago aprobado y resumen actualizado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pago, resumen]
+                properties:
+                  pago:
+                    $ref: '#/components/schemas/Pago'
+                  resumen:
+                    $ref: '#/components/schemas/ResumenPagoPartido'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '402':
+          description: El pago fue rechazado (`PAGO_RECHAZADO`); el pago queda registrado como `rechazado` en `error.datos.pago` y se puede reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PAGO_RECHAZADO, mensaje: El pago fue rechazado. Puedes intentar de nuevo con otro medio. } }
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: |
+            `PARTIDO_CERRADO` (no hay rival por pagar), `PLAZO_VENCIDO`, `PARTIDO_INICIADO`, `YA_PAGADO`, `ESTADO_INVALIDO` (la reserva ya no admite pagos) o `PAGO_EN_CURSO`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PLAZO_VENCIDO, mensaje: El plazo para pagar tu abono ya venció. } }
+        '429':
+          $ref: '#/components/responses/DemasiadasPeticiones'
+        '502':
+          description: La pasarela de pagos no está disponible (`PASARELA_NO_DISPONIBLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PASARELA_NO_DISPONIBLE, mensaje: No pudimos comunicarnos con la pasarela de pagos. Intenta de nuevo en unos minutos. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/retirar-rival:
+    post:
+      operationId: retirarRival
+      tags: [Busca Partido]
+      summary: Retirarse como rival confirmado
+      description: |
+        HU-26.3 / RN-05. Solo el capitán del equipo rival de un partido `busco_rival` en `rival_confirmado`, antes de que empiece. El partido vuelve a `buscando`.
+        Lo que el equipo pagó se reembolsa según la anticipación (misma política que RN-05, con los porcentajes de los parámetros globales). Si faltan menos de 6 horas,
+        además se suma una cancelación tardía al equipo (`cancelacionesTardias`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Rival retirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoRetiroRival'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: No hay un rival confirmado que pueda retirarse (`PARTIDO_CERRADO`) o el partido ya empezó (`PARTIDO_INICIADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PARTIDO_CERRADO, mensaje: No hay un rival confirmado que pueda retirarse. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/marcador:
+    post:
+      operationId: registrarMarcador
+      tags: [Busca Partido]
+      summary: Registrar el marcador de un partido jugado
+      description: |
+        HU-31.4. Solo el capitán de `equipoId`, uno de los dos equipos de un partido `jugado`. Cada capitán registra el marcador; queda firme (`confirmado`) cuando los dos coinciden.
+        Si un capitán cambia los goles, la confirmación del otro deja de valer. Una vez confirmado por ambos ya no se puede modificar.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarcadorInput'
+      responses:
+        '200':
+          description: Estado actual del marcador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Marcador'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/SoloCapitan'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: El partido aún no se jugó (`PARTIDO_NO_JUGADO`) o el marcador ya fue confirmado por los dos capitanes (`MARCADOR_CONFIRMADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: MARCADOR_CONFIRMADO, mensaje: El marcador ya fue confirmado por los dos capitanes. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
   /partidos/{id}/inscripciones:
     post:
       operationId: inscribirseAPartido
@@ -3506,6 +3700,516 @@ paths:
               example: { error: { codigo: PARTIDO_INICIADO, mensaje: El partido ya empezó. } }
         '500':
           $ref: '#/components/responses/ErrorInterno'
+
+  # ---------------------------------------------------------- Notificaciones (Sprint 4)
+  /notificaciones:
+    get:
+      operationId: listarNotificaciones
+      tags: [Notificaciones]
+      summary: Listar mis notificaciones
+      description: |
+        HU-28. Solo las del usuario autenticado, de la más reciente a la más antigua. Incluye el total de no leídas.
+      security:
+        - bearer: []
+      parameters:
+        - name: pagina
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: tamano
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200':
+          description: Página de notificaciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificacionesLista'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /notificaciones/no-leidas:
+    get:
+      operationId: contarNotificacionesNoLeidas
+      tags: [Notificaciones]
+      summary: Contar notificaciones no leídas
+      description: HU-28. Para el indicador de la campana.
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Cantidad de notificaciones sin leer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [noLeidas]
+                properties:
+                  noLeidas: { type: integer }
+              example: { noLeidas: 3 }
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /notificaciones/leidas:
+    post:
+      operationId: marcarTodasNotificacionesLeidas
+      tags: [Notificaciones]
+      summary: Marcar todas mis notificaciones como leídas
+      description: HU-28. Solo afecta a las del usuario autenticado.
+      security:
+        - bearer: []
+      responses:
+        '204':
+          description: Todas quedaron leídas.
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /notificaciones/{id}/leida:
+    patch:
+      operationId: marcarNotificacionLeida
+      tags: [Notificaciones]
+      summary: Marcar una notificación como leída
+      description: HU-28. Solo se pueden marcar las propias; una ajena responde 404 como si no existiera.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Notificación leída.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: La notificación no existe o no es del usuario (`NOTIFICACION_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: NOTIFICACION_NO_ENCONTRADA, mensaje: La notificación no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /preferencias-alerta:
+    get:
+      operationId: listarPreferenciasAlerta
+      tags: [Notificaciones]
+      summary: Listar mis alertas de partidos
+      description: HU-29. Preferencias del usuario autenticado.
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Alertas configuradas.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [preferencias]
+                properties:
+                  preferencias:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PreferenciaAlerta'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    post:
+      operationId: crearPreferenciaAlerta
+      tags: [Notificaciones]
+      summary: Crear una alerta de partidos compatibles
+      description: |
+        HU-29. Se avisa al usuario cuando se publica un partido que coincide con los días, la ventana de horas y los filtros indicados (los filtros en `null` no restringen).
+        Si se indica `equipoId`, el usuario debe ser capitán de ese equipo. Una alerta no avisa de los partidos publicados por el propio usuario.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenciaAlertaInput'
+      responses:
+        '201':
+          description: Alerta creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenciaAlertaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: La cuenta está inactiva (`CUENTA_INACTIVA`) o no es capitán del `equipoId` indicado (`PROHIBIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo puedes crear alertas para equipos que capitaneas. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /preferencias-alerta/{id}:
+    put:
+      operationId: actualizarPreferenciaAlerta
+      tags: [Notificaciones]
+      summary: Actualizar una alerta
+      description: HU-29. Reemplaza todos los campos de una alerta propia (también sirve para activarla o desactivarla con `activa`).
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreferenciaAlertaInput'
+      responses:
+        '200':
+          description: Alerta actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreferenciaAlertaEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          description: La cuenta está inactiva (`CUENTA_INACTIVA`) o no es capitán del `equipoId` indicado (`PROHIBIDO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PROHIBIDO, mensaje: Solo puedes crear alertas para equipos que capitaneas. } }
+        '404':
+          description: La alerta no existe o no es del usuario (`PREFERENCIA_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PREFERENCIA_NO_ENCONTRADA, mensaje: La alerta no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    delete:
+      operationId: eliminarPreferenciaAlerta
+      tags: [Notificaciones]
+      summary: Eliminar una alerta
+      description: HU-29. Solo las propias.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: Alerta eliminada.
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          description: La alerta no existe o no es del usuario (`PREFERENCIA_NO_ENCONTRADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: PREFERENCIA_NO_ENCONTRADA, mensaje: La alerta no existe } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+
+  # ---------------------------------------------------------- Calificaciones (Sprint 4)
+  /reservas/{id}/calificacion:
+    put:
+      operationId: calificarComplejo
+      tags: [Calificaciones]
+      summary: Calificar el complejo de una reserva completada
+      description: |
+        HU-30. Solo el jugador dueño de la reserva (para otros, 404) y con la reserva `completada`. Hay una calificación por reserva: si ya existe, se edita.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalificarComplejoInput'
+      responses:
+        '200':
+          description: Calificación guardada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalificacionComplejoEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '409':
+          description: La reserva aún no se puede calificar (`RESERVA_NO_COMPLETADA`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: RESERVA_NO_COMPLETADA, mensaje: Solo puedes calificar una reserva completada. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+    get:
+      operationId: obtenerMiCalificacionDeReserva
+      tags: [Calificaciones]
+      summary: Ver mi calificación de una reserva
+      description: HU-30. Solo el jugador dueño de la reserva (para otros, 404). Devuelve `null` si aún no calificó.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: La calificación propia o `null`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calificacion]
+                properties:
+                  calificacion:
+                    type: object
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/CalificacionComplejo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/ReservaNoEncontrada'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /complejos/{id}/calificaciones:
+    get:
+      operationId: listarCalificacionesDeComplejo
+      tags: [Calificaciones]
+      summary: Reseñas de un complejo
+      description: |
+        HU-30.3. Público. Las reseñas no identifican a su autor (se omiten `usuarioId` y `reservaId`), de la más reciente a la más antigua.
+        `resumen` es el promedio y el total, o `null` si el complejo aún no tiene calificaciones.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: pagina
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: tamano
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        '200':
+          description: Resumen y página de reseñas.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resumen, calificaciones]
+                properties:
+                  resumen:
+                    $ref: '#/components/schemas/ResumenCalificacion'
+                  calificaciones:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ResenaComplejo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/calificaciones:
+    post:
+      operationId: calificarEquipoRival
+      tags: [Calificaciones]
+      summary: Calificar al equipo rival o reportar su inasistencia
+      description: |
+        HU-31 / RN-12. Solo el capitán de `equipoId`, que debe ser uno de los dos equipos de un partido `jugado`. Una calificación por equipo y partido.
+        Con `noSePresento: false` se envían `puntualidad` y `fairPlay` (1 a 5). Con `noSePresento: true` solo se reporta la inasistencia: el administrador del complejo
+        debe confirmarla (RN-08) y mientras tanto no cuenta para la suspensión.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalificarEquipoInput'
+      responses:
+        '201':
+          description: Calificación registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalificacionEquipoEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/CuentaInactiva'
+        '404':
+          $ref: '#/components/responses/PartidoNoEncontrado'
+        '409':
+          description: El partido no se puede calificar (`PARTIDO_NO_CALIFICABLE`, no está `jugado` o `equipoId` no jugó) o el equipo ya lo calificó (`YA_CALIFICADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: YA_CALIFICADO, mensaje: Tu equipo ya calificó este partido. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /partidos/{id}/mi-calificacion:
+    get:
+      operationId: miCalificacionDePartido
+      tags: [Calificaciones]
+      summary: Lo que calificó mi equipo en este partido
+      description: Devuelve la calificación del equipo que capitanea el usuario, o `null` si aún no calificó o no participó.
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Calificación propia o `null`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [calificacion]
+                properties:
+                  calificacion:
+                    type: object
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/CalificacionEquipo'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '404':
+          description: El partido no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /complejos/{id}/inasistencias-reportadas:
+    get:
+      operationId: listarInasistenciasReportadas
+      tags: [Calificaciones]
+      summary: Inasistencias reportadas pendientes de confirmar
+      description: HU-31.2. Roles `AdminComplejo` del complejo o `Superadmin`. Lista los reportes `noSePresento` sin confirmar de los partidos jugados en sus canchas.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Reportes por confirmar.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reportes]
+                properties:
+                  reportes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CalificacionEquipo'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          $ref: '#/components/responses/ComplejoNoEncontrado'
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
+  /calificaciones-equipo/{id}/confirmar-inasistencia:
+    post:
+      operationId: confirmarInasistencia
+      tags: [Calificaciones]
+      summary: Confirmar la inasistencia de un equipo
+      description: |
+        HU-31.2 / RN-07, RN-08. Roles `AdminComplejo` del complejo de la reserva o `Superadmin`. Al confirmar, el equipo recibe la marca de inasistencia (una por equipo y partido)
+        y, si acumula las del umbral dentro de los últimos 60 días, queda suspendido. Quien no gestiona esa reserva recibe 404.
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Reporte confirmado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalificacionEquipoEnvuelta'
+        '400':
+          $ref: '#/components/responses/Validacion'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/Prohibido'
+        '404':
+          description: El reporte no existe o no es de un partido del complejo del usuario (`REPORTE_NO_ENCONTRADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: REPORTE_NO_ENCONTRADO, mensaje: El reporte no existe } }
+        '409':
+          description: La inasistencia ya fue confirmada (`REPORTE_YA_CONFIRMADO`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: { codigo: REPORTE_YA_CONFIRMADO, mensaje: Esta inasistencia ya fue confirmada. } }
+        '500':
+          $ref: '#/components/responses/ErrorInterno'
+
 
 components:
   securitySchemes:
@@ -3993,9 +4697,11 @@ components:
           format: date-time
         partidosJugados:
           type: integer
+          description: Reservas completadas del jugador (HU-04.2).
         fairPlay:
           type: number
           nullable: true
+          description: Promedio del fair play de los equipos del jugador; `null` si aún no tienen calificaciones.
         equipos:
           type: array
           items:
@@ -4165,7 +4871,7 @@ components:
           $ref: '#/components/schemas/Complejo'
     ComplejoResumen:
       type: object
-      required: [id, nombre, direccion, ciudad, barrio, estado, fotoPrincipal, servicios, tiposFutbol, canchasActivas, precioDesde]
+      required: [id, nombre, direccion, ciudad, barrio, estado, fotoPrincipal, servicios, tiposFutbol, canchasActivas, precioDesde, calificacion]
       properties:
         id:
           type: integer
@@ -4198,6 +4904,8 @@ components:
           type: integer
           nullable: true
           description: Precio mínimo (COP) entre las tarifas activas de canchas activas.
+        calificacion:
+          $ref: '#/components/schemas/ResumenCalificacion'
       example:
         id: 1
         nombre: Complejo El Golazo
@@ -4210,6 +4918,7 @@ components:
         tiposFutbol: [5, 7]
         canchasActivas: 3
         precioDesde: 80000
+        calificacion: { promedio: 4.5, total: 12 }
     ComplejosResumenLista:
       type: object
       required: [complejos]
@@ -4220,10 +4929,12 @@ components:
             $ref: '#/components/schemas/ComplejoResumen'
     ComplejoDetalle:
       type: object
-      required: [complejo, canchas, horarios, esGestor]
+      required: [complejo, calificacion, canchas, horarios, esGestor]
       properties:
         complejo:
           $ref: '#/components/schemas/Complejo'
+        calificacion:
+          $ref: '#/components/schemas/ResumenCalificacion'
         canchas:
           type: array
           items:
@@ -4606,6 +5317,12 @@ components:
         fotoPrincipal:
           type: string
           nullable: true
+        calificacion:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/ResumenCalificacion'
+          description: HU-30.3
         distanciaKm:
           type: number
           nullable: true
@@ -5077,10 +5794,15 @@ components:
           type: integer
           minimum: 1
           description: Cancha destino, del mismo complejo. Por defecto la misma cancha.
-      example: { fecha: '2026-12-12', horaInicio: '18:00' }
+        motivo:
+          type: string
+          nullable: true
+          maxLength: 300
+          description: Opcional para el jugador; obligatorio cuando reprograma el complejo. Un texto vacío se guarda como `null`.
+      example: { fecha: '2026-12-12', horaInicio: '18:00', motivo: Mantenimiento de la cancha }
     PreviewCancelacion:
       type: object
-      required: [horasDeAnticipacion, porcentajeReembolso, totalPagado, valorReembolso, puedeReprogramar]
+      required: [horasDeAnticipacion, porcentajeReembolso, totalPagado, valorReembolso, puedeReprogramar, partidoAfectado]
       properties:
         horasDeAnticipacion:
           type: number
@@ -5095,6 +5817,19 @@ components:
           description: COP que se reembolsarían.
         puedeReprogramar:
           type: boolean
+        partidoAfectado:
+          type: object
+          nullable: true
+          description: Partido de Busca Partido asociado a la reserva, que se cancelaría o cerraría junto con ella (HU-12.4); `null` si no tiene.
+          required: [id, estado, equipoRival]
+          properties:
+            id: { type: integer }
+            estado:
+              $ref: '#/components/schemas/EstadoPartido'
+            equipoRival:
+              type: string
+              nullable: true
+              description: Nombre del equipo rival confirmado, si lo hay.
     ResultadoCancelacion:
       type: object
       required: [reserva, porcentajeReembolso, valorReembolso]
@@ -5157,7 +5892,7 @@ components:
           $ref: '#/components/schemas/Nivel'
     Equipo:
       type: object
-      required: [id, nombre, escudoUrl, nivel, tipoFutbol, estado, capitanId, capitanPropuestoId, inasistencias, suspendidoHasta, fechaCreacion, totalMiembros]
+      required: [id, nombre, escudoUrl, nivel, tipoFutbol, estado, capitanId, capitanPropuestoId, inasistencias, cancelacionesTardias, suspendidoHasta, fechaCreacion, totalMiembros]
       properties:
         id: { type: integer }
         nombre: { type: string }
@@ -5178,6 +5913,9 @@ components:
         inasistencias:
           type: integer
           description: Inasistencias registradas (RN-08).
+        cancelacionesTardias:
+          type: integer
+          description: Veces que el equipo se retiró como rival confirmado con menos de 6 horas de anticipación (HU-26.3).
         suspendidoHasta:
           type: string
           format: date-time
@@ -5611,6 +6349,12 @@ components:
             id: { type: integer }
             estado: { type: string }
             posicion: { type: string, nullable: true }
+        marcador:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Marcador'
+          description: HU-31.4. `null` si ningún capitán lo ha registrado.
         ultimosResultados:
           type: array
           description: Últimos resultados del equipo publicador, desde su punto de vista.
@@ -5692,3 +6436,244 @@ components:
           type: integer
           nullable: true
           description: COP que debe aportar el jugador.
+
+    # ---------------------------------------------------------- Notificaciones, calificaciones y pago dividido (Sprint 4)
+    ResumenCalificacion:
+      type: object
+      nullable: true
+      description: Promedio de estrellas (1 decimal) y total de calificaciones del complejo; `null` si aún no tiene.
+      required: [promedio, total]
+      properties:
+        promedio: { type: number, example: 4.5 }
+        total: { type: integer, example: 12 }
+    Notificacion:
+      type: object
+      required: [id, tipo, titulo, mensaje, leida, referenciaTipo, referenciaId, fecha]
+      properties:
+        id: { type: integer }
+        tipo:
+          type: string
+          description: Clasificación del aviso (p. ej. `alerta_partido_compatible`).
+        titulo: { type: string }
+        mensaje: { type: string }
+        leida: { type: boolean }
+        referenciaTipo:
+          type: string
+          nullable: true
+          description: Tipo de la entidad relacionada (p. ej. `partido`).
+        referenciaId:
+          type: integer
+          nullable: true
+        fecha: { type: string, format: date-time }
+    NotificacionesLista:
+      type: object
+      required: [notificaciones, noLeidas]
+      properties:
+        notificaciones:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notificacion'
+        noLeidas:
+          type: integer
+          description: Total de notificaciones sin leer del usuario (no solo las de la página).
+    PreferenciaAlertaInput:
+      type: object
+      required: [dias, horaInicio, horaFin]
+      properties:
+        equipoId:
+          type: integer
+          nullable: true
+          description: Equipo que el usuario capitanea, o `null` para una alerta personal.
+        dias:
+          type: array
+          description: Días de la semana (1 = lunes a 7 = domingo).
+          minItems: 1
+          maxItems: 7
+          items: { type: integer, minimum: 1, maximum: 7 }
+        horaInicio:
+          $ref: '#/components/schemas/HoraEntrada'
+        horaFin:
+          allOf:
+            - $ref: '#/components/schemas/HoraEntrada'
+          description: Debe ser posterior a `horaInicio`.
+        zona:
+          type: string
+          nullable: true
+          maxLength: 100
+        nivel:
+          type: string
+          nullable: true
+          enum: [principiante, intermedio, avanzado]
+        tipoFutbol:
+          type: integer
+          nullable: true
+          enum: [5, 6, 7, 8, 11]
+        activa:
+          type: boolean
+          default: true
+      example: { equipoId: null, dias: [6, 7], horaInicio: '16:00', horaFin: '21:00', zona: Chapinero, nivel: intermedio, tipoFutbol: 5, activa: true }
+    PreferenciaAlerta:
+      type: object
+      required: [id, equipoId, dias, horaInicio, horaFin, zona, nivel, tipoFutbol, activa]
+      properties:
+        id: { type: integer }
+        equipoId: { type: integer, nullable: true }
+        dias:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 7 }
+        horaInicio:
+          $ref: '#/components/schemas/Hora'
+        horaFin:
+          $ref: '#/components/schemas/Hora'
+        zona: { type: string, nullable: true }
+        nivel:
+          type: string
+          nullable: true
+          enum: [principiante, intermedio, avanzado]
+        tipoFutbol:
+          type: integer
+          nullable: true
+          enum: [5, 6, 7, 8, 11]
+        activa: { type: boolean }
+    PreferenciaAlertaEnvuelta:
+      type: object
+      required: [preferencia]
+      properties:
+        preferencia:
+          $ref: '#/components/schemas/PreferenciaAlerta'
+    CalificarComplejoInput:
+      type: object
+      required: [estrellas]
+      properties:
+        estrellas: { type: integer, minimum: 1, maximum: 5 }
+        comentario:
+          type: string
+          nullable: true
+          maxLength: 500
+      example: { estrellas: 5, comentario: Cancha en excelente estado }
+    CalificacionComplejo:
+      type: object
+      required: [id, reservaId, usuarioId, complejoId, estrellas, comentario, fecha]
+      properties:
+        id: { type: integer }
+        reservaId: { type: integer }
+        usuarioId: { type: integer }
+        complejoId: { type: integer }
+        estrellas: { type: integer, minimum: 1, maximum: 5 }
+        comentario: { type: string, nullable: true }
+        fecha: { type: string, format: date-time }
+    CalificacionComplejoEnvuelta:
+      type: object
+      required: [calificacion]
+      properties:
+        calificacion:
+          $ref: '#/components/schemas/CalificacionComplejo'
+    ResenaComplejo:
+      type: object
+      description: Reseña pública de un complejo, sin identificar al autor.
+      required: [id, complejoId, estrellas, comentario, fecha]
+      properties:
+        id: { type: integer }
+        complejoId: { type: integer }
+        estrellas: { type: integer, minimum: 1, maximum: 5 }
+        comentario: { type: string, nullable: true }
+        fecha: { type: string, format: date-time }
+    CalificarEquipoInput:
+      description: |
+        Con `noSePresento: false` son obligatorios `puntualidad` y `fairPlay`; con `noSePresento: true` solo se envía `comentario` opcional.
+      oneOf:
+        - type: object
+          required: [noSePresento, equipoId, puntualidad, fairPlay]
+          properties:
+            noSePresento: { type: boolean, enum: [false] }
+            equipoId: { type: integer, minimum: 1, description: Equipo que califica (el usuario debe ser su capitán). }
+            puntualidad: { type: integer, minimum: 1, maximum: 5 }
+            fairPlay: { type: integer, minimum: 1, maximum: 5 }
+            comentario: { type: string, nullable: true, maxLength: 500 }
+        - type: object
+          required: [noSePresento, equipoId]
+          properties:
+            noSePresento: { type: boolean, enum: [true] }
+            equipoId: { type: integer, minimum: 1, description: Equipo que reporta (el usuario debe ser su capitán). }
+            comentario: { type: string, nullable: true, maxLength: 500 }
+      example: { noSePresento: false, equipoId: 9, puntualidad: 4, fairPlay: 5, comentario: Buen partido }
+    CalificacionEquipo:
+      type: object
+      required: [id, partidoId, equipoCalificadorId, equipoCalificadoId, puntualidad, fairPlay, noSePresento, confirmadoPorAdmin, comentario, fecha]
+      properties:
+        id: { type: integer }
+        partidoId: { type: integer }
+        equipoCalificadorId: { type: integer }
+        equipoCalificadoId: { type: integer }
+        puntualidad: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+        fairPlay: { type: integer, nullable: true, minimum: 1, maximum: 5 }
+        noSePresento: { type: boolean }
+        confirmadoPorAdmin:
+          type: boolean
+          description: Verdadero cuando el administrador confirmó la inasistencia (RN-08).
+        comentario: { type: string, nullable: true }
+        fecha: { type: string, format: date-time }
+    CalificacionEquipoEnvuelta:
+      type: object
+      required: [calificacion]
+      properties:
+        calificacion:
+          $ref: '#/components/schemas/CalificacionEquipo'
+    ResumenPagoPartido:
+      type: object
+      required: [precioTotal, totalPagado, saldoPendiente, equipoDueno, equipoRival]
+      properties:
+        precioTotal: { type: integer, description: COP total de la reserva. }
+        totalPagado: { type: integer }
+        saldoPendiente: { type: integer }
+        equipoDueno:
+          type: object
+          description: Equipo dueño de la reserva.
+          required: [equipoId, parte, pagado]
+          properties:
+            equipoId: { type: integer }
+            parte: { type: integer, description: COP que le corresponden. }
+            pagado: { type: integer }
+        equipoRival:
+          type: object
+          nullable: true
+          description: Equipo que debe su parte; `null` si aún no hay rival confirmado.
+          required: [equipoId, parte, abono, pagado, limitePago]
+          properties:
+            equipoId: { type: integer }
+            parte: { type: integer, description: COP que le corresponden. }
+            abono: { type: integer, description: COP mínimos a pagar para sostener la confirmación. }
+            pagado: { type: integer }
+            limitePago:
+              type: string
+              format: date-time
+              nullable: true
+              description: Fecha límite para pagar el abono; pasada, el equipo se anula y el partido vuelve a buscar rival.
+    ResultadoRetiroRival:
+      type: object
+      required: [porcentajeReembolso, valorReembolso, cancelacionTardia]
+      properties:
+        porcentajeReembolso: { type: number }
+        valorReembolso: { type: integer, description: COP devueltos al equipo que se retira. }
+        cancelacionTardia:
+          type: boolean
+          description: Verdadero si faltaban menos de 6 horas (se suma a `cancelacionesTardias` del equipo).
+    MarcadorInput:
+      type: object
+      required: [equipoId, golesPublicador, golesRival]
+      properties:
+        equipoId: { type: integer, minimum: 1, description: Equipo del capitán que registra. }
+        golesPublicador: { type: integer, minimum: 0, maximum: 99 }
+        golesRival: { type: integer, minimum: 0, maximum: 99 }
+      example: { equipoId: 9, golesPublicador: 3, golesRival: 2 }
+    Marcador:
+      type: object
+      required: [golesPublicador, golesRival, confirmadoPublicador, confirmadoRival, confirmado]
+      properties:
+        golesPublicador: { type: integer, nullable: true }
+        golesRival: { type: integer, nullable: true }
+        confirmadoPublicador: { type: boolean }
+        confirmadoRival: { type: boolean }
+        confirmado:
+          type: boolean
+          description: Verdadero cuando los dos capitanes registraron el mismo marcador.

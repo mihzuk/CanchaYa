@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Badge, Card } from '../../../components/ui';
 import { formatCOP } from '../../../lib/format';
+import { StarRatingDisplay } from '../../ratings/components/StarRating';
 import type { ComplejoResumen } from '../types';
 
 interface VenueCardProps {
@@ -33,6 +34,9 @@ export function VenueCard({ complejo, to }: VenueCardProps) {
           {complejo.barrio}, {complejo.ciudad}
           <br />
           {complejo.direccion}
+        </p>
+        <p className="venue-card__rating">
+          <StarRatingDisplay resumen={complejo.calificacion ?? null} compacto />
         </p>
         {complejo.tiposFutbol.length > 0 && (
           <p className="venue-card__meta">

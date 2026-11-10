@@ -33,7 +33,7 @@ export type PagoManualDto = z.infer<typeof pagoManualSchema>;
 
 // HU-12
 export const cancelacionSchema = z.object({ motivo: zTextoOpcional(255) });
-export const reprogramacionSchema = z.object({ fecha: zFecha, horaInicio: zHora, canchaId: zId.optional() });
+export const reprogramacionSchema = z.object({ fecha: zFecha, horaInicio: zHora, canchaId: zId.optional(), motivo: zTextoOpcional(300) });
 export type ReprogramacionDto = z.infer<typeof reprogramacionSchema>;
 
 // HU-18
@@ -75,4 +75,6 @@ export interface PreviewCancelacionDto {
   totalPagado: number;
   valorReembolso: number;
   puedeReprogramar: boolean;
+  /** Partido de Busca Partido que se cancelaría junto con la reserva. */
+  partidoAfectado: { id: number; estado: string; equipoRival: string | null } | null;
 }

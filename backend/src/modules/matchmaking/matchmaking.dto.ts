@@ -57,6 +57,17 @@ export type FiltrosPartidos = z.infer<typeof filtrosPartidosSchema>;
 export const postularSchema = z.object({ equipoId: zId });
 export const aceptarConReservaSchema = z.object({ equipoId: zId, reservaId: zId });
 export const inscribirSchema = z.object({ posicion: z.enum(POSICIONES).nullable().default(null) });
+export const pagoRivalSchema = z.object({
+  metodo: z.enum(['tarjeta', 'pse', 'nequi'], { errorMap: () => ({ message: 'Elige tarjeta, PSE o Nequi' }) }),
+  valor: z.number().int().positive().optional(),
+  datos: z.object({ numeroTarjeta: z.string().trim().regex(/^[\d ]{12,23}$/, 'Número de tarjeta inválido').optional(), resultado: z.enum(['aprobado', 'rechazado']).optional() }).strict().optional(),
+});
+export type PagoRivalDto = z.infer<typeof pagoRivalSchema>;
+
+// HU-31.4
+const zGoles = z.number({ invalid_type_error: 'Debe ser un número' }).int().min(0).max(99);
+export const marcadorSchema = z.object({ equipoId: zId, golesPublicador: zGoles, golesRival: zGoles });
+
 export const respuestaSchema = z.object({ aceptar: z.boolean({ required_error: 'Indica si aceptas' }) });
 
 // --- Salida -----------------------------------------------------------------------------------

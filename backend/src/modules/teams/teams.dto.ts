@@ -39,6 +39,7 @@ export interface EquipoDto {
   capitanId: number;
   capitanPropuestoId: number | null;
   inasistencias: number;
+  cancelacionesTardias: number;
   suspendidoHasta: string | null;
   fechaCreacion: string;
   totalMiembros: number;

@@ -66,6 +66,15 @@ export function diferenciaDias(a: string, b: string): number {
 }
 
 /** Día de la semana ISO: 1 = lunes ... 7 = domingo. */
+const FECHA_LEGIBLE = new Intl.DateTimeFormat('es-CO', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+/** 'YYYY-MM-DD' → 'jue, 26 nov' para mensajes al usuario. */
+export function fechaLegible(fecha: string | null | undefined): string {
+  if (!fecha || !esFechaValida(fecha)) return fecha ?? '';
+  const [a, m, d] = fecha.split('-').map(Number);
+  return FECHA_LEGIBLE.format(new Date(Date.UTC(a!, m! - 1, d!))).replace(/\./g, '');
+}
+
 export function diaSemanaIso(fecha: string): number {
   const d = fechaAUtc(fecha).getUTCDay();
   return d === 0 ? 7 : d;

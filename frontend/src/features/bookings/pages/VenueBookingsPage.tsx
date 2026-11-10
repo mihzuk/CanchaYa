@@ -7,7 +7,7 @@ import { ApiError } from '../../../lib/api';
 import { formatCOP, formatFecha, formatHora, hoyBogota } from '../../../lib/format';
 import { registrarPagoManual } from '../../payments/api';
 import { mensajeError } from '../../venues/utils';
-import { calendarioComplejo, cambiarEstadoReserva, cancelarReserva, crearReservaManual, disponibilidadComplejo } from '../api';
+import { calendarioComplejo, cambiarEstadoReserva, cancelarReserva, crearReservaManual, disponibilidadComplejo, moverReserva } from '../api';
 import { BookingCalendar, nombreCliente } from '../components/BookingCalendar';
 import { ESTADOS_ACTIVOS, EstadoReservaBadge } from '../components/BookingSummary';
 import type { Reserva } from '../types';
@@ -39,7 +39,116 @@ function useRefrescarComplejo(complejoId: number) {
     void qc.invalidateQueries({ queryKey: ['disponibilidad'] });
     void qc.invalidateQueries({ queryKey: ['pagos-complejo', complejoId] });
     void qc.invalidateQueries({ queryKey: ['reembolsos-complejo', complejoId] });
+    void qc.invalidateQueries({ queryKey: ['partidos'] });
+    void qc.invalidateQueries({ queryKey: ['partido'] });
   };
+}
+
+function MoverReserva({ reserva, complejoId, onCerrar }: { reserva: Reserva; complejoId: number; onCerrar: () => void }) {
+  const refrescar = useRefrescarComplejo(complejoId);
+  const { mostrar } = useToast();
+  const [abierto, setAbierto] = useState(false);
+  const [fecha, setFecha] = useState('');
+  const [elegida, setElegida] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [errorLocal, setErrorLocal] = useState<string | undefined>();
+
+  const disp = useQuery({
+    queryKey: ['disponibilidad-complejo', complejoId, fecha],
+    queryFn: () => disponibilidadComplejo(complejoId, fecha),
+    enabled: abierto && fecha !== '',
+  });
+  const libres = (disp.data?.canchas ?? []).flatMap((c) =>
+    c.franjas.filter((f) => f.estado === 'libre').map((f) => ({ canchaId: c.id, cancha: c.nombre, franja: f })),
+  );
+
+  const mover = useMutation({
+    mutationFn: () => {
+      const [canchaId, hora] = elegida.split('|');
+      return moverReserva(reserva.id, { fecha, horaInicio: hora ?? '', canchaId: Number(canchaId), motivo: motivo.trim() });
+    },
+    onSuccess: (r) => {
+      mostrar(`Reserva movida al ${formatFecha(r.reserva.fecha)}, ${formatHora(r.reserva.horaInicio)}. Se avisó al cliente.`, 'success');
+      refrescar();
+      onCerrar();
+    },
+  });
+
+  function enviar(e: FormEvent) {
+    e.preventDefault();
+    if (!fecha || !elegida) {
+      setErrorLocal('Elige la nueva fecha y una franja libre.');
+      return;
+    }
+    if (!motivo.trim()) {
+      setErrorLocal('Indica el motivo del cambio para el cliente.');
+      return;
+    }
+    setErrorLocal(undefined);
+    mover.mutate();
+  }
+
+  if (!abierto) {
+    return (
+      <section className="stack stack--wide" aria-label="Mover reserva">
+        <h3>Mover reserva</h3>
+        <div>
+          <Button variant="secondary" onClick={() => setAbierto(true)}>
+            Mover reserva
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <form onSubmit={enviar} noValidate className="form" aria-label="Mover reserva">
+      <h3>Mover reserva</h3>
+      <p className="muted">Al cliente nunca se le cobra más por este cambio.</p>
+      {errorLocal && <Alert tone="error">{errorLocal}</Alert>}
+      {mover.error && <Alert tone="error">{mensajeError(mover.error)}</Alert>}
+      <Input
+        label="Nueva fecha"
+        type="date"
+        min={hoyBogota()}
+        value={fecha}
+        onChange={(e) => {
+          setFecha(e.target.value);
+          setElegida('');
+        }}
+      />
+      {fecha && disp.isPending && <Spinner label="Buscando franjas…" />}
+      {disp.isError && <Alert tone="error">{mensajeError(disp.error)}</Alert>}
+      {disp.isSuccess && libres.length === 0 && <p className="muted">No hay franjas libres ese día.</p>}
+      {libres.length > 0 && (
+        <fieldset className="slot-fieldset">
+          <legend>Nueva hora (franja libre)</legend>
+          <ul className="slot-grid">
+            {libres.map((l) => {
+              const valor = `${l.canchaId}|${l.franja.horaInicio}`;
+              return (
+                <li key={valor}>
+                  <button type="button" className={`slot slot--libre${elegida === valor ? ' is-selected' : ''}`} aria-pressed={elegida === valor} onClick={() => setElegida(valor)}>
+                    <span className="slot__time">{formatHora(l.franja.horaInicio)}</span>
+                    <span className="slot__state">{l.cancha}</span>
+                    <span className="slot__price">{l.franja.precio !== null ? formatCOP(l.franja.precio) : '—'}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      )}
+      <Input label="Motivo del cambio (obligatorio, se le informa al cliente)" value={motivo} maxLength={255} onChange={(e) => setMotivo(e.target.value)} error={detalle(mover.error, 'motivo')} />
+      <div className="row-actions">
+        <Button type="submit" loading={mover.isPending}>
+          Mover reserva
+        </Button>
+        <Button variant="ghost" onClick={() => setAbierto(false)}>
+          No mover
+        </Button>
+      </div>
+    </form>
+  );
 }
 
 function AccionesReserva({ reserva, complejoId, onCerrar }: { reserva: Reserva; complejoId: number; onCerrar: () => void }) {
@@ -181,6 +290,8 @@ function AccionesReserva({ reserva, complejoId, onCerrar }: { reserva: Reserva; 
           )}
         </section>
       )}
+
+      {activa && !iniciada && <MoverReserva reserva={reserva} complejoId={complejoId} onCerrar={onCerrar} />}
 
       {activa && !iniciada && (
         <form onSubmit={enviarCancelar} noValidate className="form" aria-label="Cancelar reserva">
@@ -333,6 +444,9 @@ export function VenueBookingsPage() {
         </Link>
         <Link className="btn btn--secondary" to={`/mis-complejos/${complejoId}/reembolsos`}>
           Reembolsos
+        </Link>
+        <Link className="btn btn--secondary" to={`/mis-complejos/${complejoId}/inasistencias`}>
+          Inasistencias reportadas
         </Link>
       </nav>
       <Input label="Fecha" type="date" value={fecha} onChange={(e) => e.target.value && setFecha(e.target.value)} />

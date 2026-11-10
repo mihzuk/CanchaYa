@@ -30,6 +30,10 @@ import { ManageVenuePage } from '../features/venues/pages/ManageVenuePage';
 import { MyVenuesPage } from '../features/venues/pages/MyVenuesPage';
 import { VenueDetailPage } from '../features/venues/pages/VenueDetailPage';
 import { VenueListPage } from '../features/venues/pages/VenueListPage';
+import { AlertPreferencesPage } from '../features/notifications/pages/AlertPreferencesPage';
+import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
+import { RateVenuePage } from '../features/ratings/pages/RateVenuePage';
+import { VenueNoShowsPage } from '../features/ratings/pages/VenueNoShowsPage';
 import { ErrorPage } from './ErrorPage';
 import { HomePage } from './HomePage';
 import { NotFoundPage } from './NotFoundPage';
@@ -100,6 +104,7 @@ const rutasReservas: RouteObject[] = [
   { path: 'reservar', element: privada(<BookingPage />) },
   { path: 'reservas/:id/pagar', element: privada(<PaymentPage />) },
   { path: 'mis-reservas', element: privada(<MyBookingsPage />) },
+  { path: 'reservas/:id', element: privada(<RateVenuePage />) },
   { path: 'mis-complejos/:id/reservas', element: gestor(<VenueBookingsPage />) },
   { path: 'mis-complejos/:id/pagos', element: gestor(<VenuePaymentsPage />) },
   { path: 'mis-complejos/:id/reembolsos', element: gestor(<RefundsPage />) },
@@ -120,6 +125,13 @@ const rutasPartidos: RouteObject[] = [
   { path: 'partidos/:id', element: <MatchDetailPage /> },
 ];
 
+// EP-07 · Notificaciones, alertas y calificaciones
+const rutasNotificaciones: RouteObject[] = [
+  { path: 'notificaciones', element: privada(<NotificationsPage />) },
+  { path: 'notificaciones/alertas', element: privada(<AlertPreferencesPage />) },
+  { path: 'mis-complejos/:id/inasistencias', element: gestor(<VenueNoShowsPage />) },
+];
+
 const hijas: RouteObject[] = [
   ...rutasGenerales,
   ...rutasAuth,
@@ -128,6 +140,7 @@ const hijas: RouteObject[] = [
   ...rutasReservas,
   ...rutasEquipos,
   ...rutasPartidos,
+  ...rutasNotificaciones,
   { path: '*', element: <NotFoundPage /> },
 ];
 

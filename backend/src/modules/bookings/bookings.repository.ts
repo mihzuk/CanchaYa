@@ -175,6 +175,21 @@ export const bookingsRepository = {
     return filas.map((f) => aDto(f));
   },
 
+  /** HT-06: reservas con dueño, confirmadas o pagadas, de los días indicados (para recordatorios). */
+  async confirmadasEnFechas(desde: string, hasta: string): Promise<ReservaInterna[]> {
+    const filas = await query<ReservaFila>(
+      `${SELECT_RESERVA} WHERE r.estado IN ('confirmada', 'pagada') AND r.usuario_id IS NOT NULL AND r.fecha BETWEEN $1 AND $2`,
+      [desde, hasta],
+    );
+    return filas.map((f) => aDto(f));
+  },
+
+  /** HU-04.2: partidos jugados por un usuario. */
+  async contarCompletadas(usuarioId: number): Promise<number> {
+    const fila = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM reserva WHERE usuario_id = $1 AND estado = 'completada'", [usuarioId]);
+    return fila?.n ?? 0;
+  },
+
   /** Varias reservas por id (cualquier complejo), para Busca Partido. */
   async porIds(ids: number[], db?: Queryable): Promise<ReservaInterna[]> {
     if (!ids.length) return [];

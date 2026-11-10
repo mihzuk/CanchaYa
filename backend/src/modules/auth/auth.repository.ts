@@ -157,6 +157,13 @@ export const authRepository = {
     return new Map(filas.map((f) => [f.id, f.nombre]));
   },
 
+  /** Solo para enviar correos: nunca se expone en una respuesta. */
+  async contactos(ids: number[]): Promise<Map<number, { correo: string; nombres: string }>> {
+    if (!ids.length) return new Map();
+    const filas = await query<{ id: number; correo: string; nombres: string }>("SELECT id, correo, nombres FROM usuario WHERE id = ANY($1::bigint[]) AND estado = 'activo'", [ids]);
+    return new Map(filas.map((f) => [f.id, { correo: f.correo, nombres: f.nombres }]));
+  },
+
   /** Datos públicos de varios usuarios activos (sin correo ni celular). */
   async publicos(ids: number[]): Promise<Map<number, { id: number; username: string; nombre: string; fotoUrl: string | null }>> {
     if (!ids.length) return new Map();

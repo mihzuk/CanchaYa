@@ -1,3 +1,5 @@
+import type { ResumenCalificacion } from '../ratings/types';
+
 export interface Servicio {
   id: number;
   nombre: string;
@@ -39,6 +41,7 @@ export interface ComplejoResumen {
   tiposFutbol: number[];
   canchasActivas: number;
   precioDesde: number | null;
+  calificacion?: ResumenCalificacion | null;
 }
 export type TipoFutbol = 5 | 6 | 7 | 8 | 11;
 export const TIPOS_FUTBOL: TipoFutbol[] = [5, 6, 7, 8, 11];
@@ -160,4 +163,5 @@ export interface DetalleComplejo {
   canchas: Cancha[];
   horarios: Horario[];
   esGestor: boolean;
+  calificacion?: ResumenCalificacion | null;
 }

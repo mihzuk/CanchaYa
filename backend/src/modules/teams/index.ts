@@ -15,6 +15,10 @@ export const teamsApi = {
   porIds: repo.porIds,
   esMiembro: repo.esMiembro,
   capitaneadosPor: repo.idsCapitaneados,
+  capitanes: repo.capitanes,
+  aplicarInasistencia: repo.aplicarInasistencia,
+  marcarCancelacionTardia: repo.marcarCancelacionTardia,
+  levantarSuspensiones: repo.levantarSuspensiones,
   /** Bloquea la fila del equipo dentro de una transacción (RN-11). */
   async bloquear(id: number, db: Queryable) {
     return repo.obtener(id, db, true);
