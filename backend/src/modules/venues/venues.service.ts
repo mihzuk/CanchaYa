@@ -29,6 +29,19 @@ import { venuesRepository as repo } from './venues.repository';
 
 const MAX_FOTOS = 10;
 
+// --- Puerto hacia calificaciones (HU-30.3): venues no puede importar ratings. --------------------
+export type ConsultaCalificaciones = (complejoIds: number[]) => Promise<Map<number, { promedio: number; total: number }>>;
+let consultaCalificaciones: ConsultaCalificaciones = async () => new Map();
+export const calificacionesDeComplejos: ConsultaCalificaciones = (ids) => consultaCalificaciones(ids);
+export function registrarConsultaCalificaciones(fn: ConsultaCalificaciones): void {
+  consultaCalificaciones = fn;
+}
+
+async function conCalificacion<T extends { id: number }>(complejos: T[]): Promise<(T & { calificacion: { promedio: number; total: number } | null })[]> {
+  const notas = await consultaCalificaciones(complejos.map((c) => c.id));
+  return complejos.map((c) => ({ ...c, calificacion: notas.get(c.id) ?? null }));
+}
+
 // --- Puerto hacia reservas ---------------------------------------------------------------------
 // venues no puede importar bookings (bookings depende de venues). bookings registra aquí cómo
 // consultar sus reservas activas para las advertencias de HU-07 y HU-09.
@@ -131,11 +144,11 @@ export const venuesService = {
   /** HU-05 criterio 2: solo los complejos activos aparecen en las búsquedas. */
   async buscarComplejos(f: FiltrosComplejos): Promise<{ complejos: ComplejoResumenDto[]; total: number; pagina: number; tamano: number }> {
     const r = await repo.listarComplejos({ ...f, estado: 'activo' });
-    return { ...r, pagina: f.pagina, tamano: f.tamano };
+    return { ...r, complejos: await conCalificacion(r.complejos), pagina: f.pagina, tamano: f.tamano };
   },
 
   async misComplejos(usuario: UsuarioSesion): Promise<ComplejoResumenDto[]> {
-    return (await repo.listarComplejos({ adminId: usuario.id, tamano: 500 })).complejos;
+    return conCalificacion((await repo.listarComplejos({ adminId: usuario.id, tamano: 500 })).complejos);
   },
 
   /** HU-33: el superadministrador decide con el detalle completo (teléfono, descripción, fotos). */
@@ -157,6 +170,7 @@ export const venuesService = {
     const hoy = hoyBogota();
     return {
       complejo,
+      calificacion: (await consultaCalificaciones([id])).get(id) ?? null,
       canchas,
       // Al público solo le interesan las fechas especiales que vienen.
       horarios: esGestor ? horarios : horarios.filter((h) => h.fechaEspecial === null || h.fechaEspecial >= hoy),

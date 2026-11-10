@@ -224,6 +224,7 @@ export const bookingsService = {
     const franjas = await franjasPorCancha(canchas, b.fecha, ahora);
     const origen = b.lat !== undefined && b.lng !== undefined ? { lat: b.lat, lng: b.lng } : null;
 
+    const notas = await venuesApi.calificacionesDeComplejos([...new Set(canchas.map((x) => x.complejo.id))]); // HU-30.3
     const porComplejo = new Map<number, ResultadoBusquedaDto>();
     const todasLibres: { complejo: ResultadoBusquedaDto['complejo']; cancha: { id: number; nombre: string; tipoFutbol: number }; franja: FranjaDisponibleDto }[] = [];
     for (const cancha of canchas) {
@@ -236,6 +237,7 @@ export const bookingsService = {
         direccion: c.direccion,
         fotoPrincipal: c.fotoPrincipal,
         distanciaKm: origen && c.latitud !== null && c.longitud !== null ? distanciaKm(origen, { lat: c.latitud, lng: c.longitud }) : null,
+        calificacion: notas.get(c.id) ?? null,
       };
       const libres = (franjas.get(cancha.id) ?? []).filter((f) => f.estado === 'libre');
       for (const f of libres) todasLibres.push({ complejo: info, cancha: { id: cancha.id, nombre: cancha.nombre, tipoFutbol: cancha.tipoFutbol }, franja: f });
@@ -371,6 +373,8 @@ export const bookingsInterno = {
     for (const id of [...new Set(ids)].sort((a, b) => a - b)) await venuesApi.bloquearCancha(id, db);
   },
   idsDeComplejo: repo.idsDeComplejo,
+  confirmadasEnFechas: repo.confirmadasEnFechas,
+  contarCompletadas: repo.contarCompletadas,
   porIds: repo.porIds,
   nombresDeJugadores,
   emitirExpiradas,

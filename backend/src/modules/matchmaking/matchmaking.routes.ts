@@ -24,6 +24,14 @@ matchmakingRoutes.get('/partidos/:id/postulaciones', authenticate, c.postulacion
 matchmakingRoutes.post('/postulaciones/:id/respuesta', authenticate, c.responderPostulacion);
 matchmakingRoutes.delete('/postulaciones/:id', authenticate, c.retirarPostulacion);
 
+// HU-26
+matchmakingRoutes.get('/partidos/:id/resumen-pago', authenticate, c.resumenPago);
+matchmakingRoutes.post('/partidos/:id/pago-rival', authenticate, limitePublicar, c.pagarRival);
+matchmakingRoutes.post('/partidos/:id/retirar-rival', authenticate, c.retirarRival);
+
+// HU-31.4
+matchmakingRoutes.post('/partidos/:id/marcador', authenticate, c.marcador);
+
 // HU-22.4
 matchmakingRoutes.post('/partidos/:id/aceptar-con-reserva', authenticate, c.aceptarConReserva);
 

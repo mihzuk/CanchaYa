@@ -92,6 +92,8 @@ export interface ResultadoBusquedaDto {
     direccion: string;
     fotoPrincipal: string | null;
     distanciaKm: number | null;
+    /** HU-30.3 */
+    calificacion: { promedio: number; total: number } | null;
   };
   canchas: {
     id: number;

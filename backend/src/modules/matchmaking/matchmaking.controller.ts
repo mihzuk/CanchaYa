@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { validar, zParamsId } from '../../shared/http/validar';
 import { usuarioDe } from '../../shared/middleware/authenticate';
-import { aceptarConReservaSchema, filtrosPartidosSchema, inscribirSchema, postularSchema, publicarSchema, respuestaSchema } from './matchmaking.dto';
+import { aceptarConReservaSchema, filtrosPartidosSchema, inscribirSchema, marcadorSchema, pagoRivalSchema, postularSchema, publicarSchema, respuestaSchema } from './matchmaking.dto';
 import { matchmakingService as s } from './matchmaking.service';
 
 const id = (req: Request) => validar(zParamsId, req.params).id;
@@ -48,6 +48,19 @@ export const matchmakingController = {
   },
   async responderInscripcion(req: Request, res: Response) {
     res.json({ partido: await s.responderInscripcion(id(req), usuarioDe(req), validar(respuestaSchema, req.body).aceptar) });
+  },
+  async resumenPago(req: Request, res: Response) {
+    res.json(await s.resumenDePago(id(req), usuarioDe(req)));
+  },
+  async pagarRival(req: Request, res: Response) {
+    res.status(201).json(await s.pagarParteRival(id(req), usuarioDe(req), validar(pagoRivalSchema, req.body)));
+  },
+  async retirarRival(req: Request, res: Response) {
+    res.json(await s.retirarRival(id(req), usuarioDe(req)));
+  },
+  async marcador(req: Request, res: Response) {
+    const d = validar(marcadorSchema, req.body);
+    res.json(await s.registrarMarcador(id(req), usuarioDe(req), d.equipoId, { publicador: d.golesPublicador, rival: d.golesRival }));
   },
   async retirarInscripcion(req: Request, res: Response) {
     await s.retirarInscripcion(id(req), usuarioDe(req));

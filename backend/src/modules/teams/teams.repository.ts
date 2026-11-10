@@ -13,6 +13,7 @@ interface EquipoFila {
   capitan_id: number;
   capitan_propuesto_id: number | null;
   inasistencias: number;
+  cancelaciones_tardias: number;
   suspendido_hasta: Date | null;
   fecha_creacion: Date;
   total_miembros: number;
@@ -32,6 +33,7 @@ const aDto = (e: EquipoFila): EquipoDto => ({
   capitanId: e.capitan_id,
   capitanPropuestoId: e.capitan_propuesto_id,
   inasistencias: e.inasistencias,
+  cancelacionesTardias: e.cancelaciones_tardias,
   suspendidoHasta: e.suspendido_hasta?.toISOString() ?? null,
   fechaCreacion: e.fecha_creacion.toISOString(),
   totalMiembros: e.total_miembros,
@@ -74,6 +76,28 @@ export const teamsRepository = {
       [usuarioId],
     );
     return filas.map(aDto);
+  },
+
+  /** RN-07 / RN-08: suma una inasistencia y, si corresponde, suspende. */
+  async aplicarInasistencia(equipoId: number, suspendidoHasta: Date | null, db: Queryable): Promise<void> {
+    await query('UPDATE equipo SET inasistencias = inasistencias + 1, suspendido_hasta = COALESCE($2, suspendido_hasta) WHERE id = $1', [equipoId, suspendidoHasta], db);
+  },
+
+  /** HU-26.3 */
+  async marcarCancelacionTardia(equipoId: number, db?: Queryable): Promise<void> {
+    await query('UPDATE equipo SET cancelaciones_tardias = cancelaciones_tardias + 1 WHERE id = $1', [equipoId], db);
+  },
+
+  /** RN-08 / HT-06.4: quita las suspensiones vencidas y devuelve qué equipos quedaron libres. */
+  async levantarSuspensiones(ahora: Date): Promise<number[]> {
+    const filas = await query<{ id: number }>('UPDATE equipo SET suspendido_hasta = NULL WHERE suspendido_hasta <= $1 RETURNING id', [ahora]);
+    return filas.map((f) => f.id);
+  },
+
+  async capitanes(ids: number[]): Promise<Map<number, number>> {
+    if (!ids.length) return new Map();
+    const filas = await query<{ id: number; capitan_id: number }>('SELECT id, capitan_id FROM equipo WHERE id = ANY($1::bigint[])', [ids]);
+    return new Map(filas.map((f) => [f.id, f.capitan_id]));
   },
 
   async idsCapitaneados(usuarioId: number): Promise<number[]> {

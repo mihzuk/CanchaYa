@@ -3,10 +3,10 @@
  */
 import './venues.events';
 import { venuesRepository } from './venues.repository';
-import { venuesService } from './venues.service';
+import { venuesService, calificacionesDeComplejos } from './venues.service';
 
 export { venuesRoutes } from './venues.routes';
-export { registrarConsultaReservas, type ConsultaReservas } from './venues.service';
+export { registrarConsultaReservas, registrarConsultaCalificaciones, type ConsultaReservas } from './venues.service';
 export { generarFranjas, seCruzan, franjaSeCruzaConRango, marcarFranjas, type Franja, type EstadoFranja, type RangoLocal } from './domain/slots';
 export { horarioParaFecha, franjasDelDia, estaAbierto, type Horario } from './domain/schedule';
 export { precioDeFranja, tipoDeDia, type TipoDia } from './domain/rates';
@@ -24,6 +24,7 @@ export type {
 
 /** Operaciones que usan bookings y admin. */
 export const venuesApi = {
+  calificacionesDeComplejos,
   franjasDeCancha: venuesService.franjasDeCancha.bind(venuesService),
   obtenerComplejo: venuesRepository.obtenerComplejo,
   obtenerCancha: venuesRepository.obtenerCancha,

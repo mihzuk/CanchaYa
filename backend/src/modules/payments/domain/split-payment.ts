@@ -11,6 +11,12 @@ export function dividirValor(total: number, porcentajeRival: number): { publicad
   return { publicador: total - rival, rival };
 }
 
+/** HU-26: el abono de un equipo es su parte multiplicada por el mismo porcentaje de abono de la reserva. */
+export function abonoDeParte(parte: number, precioTotal: number, abonoRequerido: number): number {
+  if (precioTotal <= 0) return 0;
+  return Math.min(parte, Math.round((parte * abonoRequerido) / precioTotal));
+}
+
 /** Cuánto ha pagado cada equipo de su parte (HU-17.2). */
 export function avanceDePago(parte: number, pagado: number): { parte: number; pagado: number; pendiente: number } {
   return { parte, pagado, pendiente: Math.max(0, parte - pagado) };

@@ -4,11 +4,12 @@ import type { EstadoPago, MetodoPago, PagoDto, ReembolsoDto, TipoPago } from './
 /** Único lugar con SQL del módulo payments. Siempre consultas parametrizadas. */
 
 /** Pago con lo reembolsado: `reembolsado` (ya devuelto) y `reembolsoPendiente` (por devolver). */
-export type PagoConReembolsos = PagoDto & { reembolsado: number; reembolsoPendiente: number };
+/** `liquidado`: lo perdió un equipo que salió del partido (HU-26.3); ya no es suyo ni del dueño. */
+export type PagoConReembolsos = PagoDto & { reembolsado: number; reembolsoPendiente: number; liquidado: boolean };
 
 const SELECT_PAGO = `
   SELECT p.id, p.reserva_id AS "reservaId", p.usuario_id AS "usuarioId", p.equipo_id AS "equipoId", p.valor, p.tipo, p.metodo,
-         p.referencia, p.estado, p.fecha,
+         p.referencia, p.estado, p.fecha, p.liquidado,
          COALESCE((SELECT sum(rb.valor) FROM reembolso rb WHERE rb.pago_id = p.id AND rb.estado = 'reembolsado'), 0) AS reembolsado,
          COALESCE((SELECT sum(rb.valor) FROM reembolso rb WHERE rb.pago_id = p.id AND rb.estado = 'pendiente'), 0) AS "reembolsoPendiente"
     FROM pago p`;
@@ -30,13 +31,13 @@ const MINUTOS_PAGO_EN_CURSO = 5;
 
 export const paymentsRepository = {
   async crearPago(
-    d: { reservaId: number; usuarioId: number | null; valor: number; tipo: TipoPago; metodo: MetodoPago; referencia: string | null; estado: EstadoPago },
+    d: { reservaId: number; usuarioId: number | null; equipoId?: number | null; valor: number; tipo: TipoPago; metodo: MetodoPago; referencia: string | null; estado: EstadoPago },
     db: Queryable,
   ): Promise<PagoConReembolsos> {
     const fila = await queryOne<{ id: number }>(
-      `INSERT INTO pago (reserva_id, usuario_id, valor, tipo, metodo, referencia, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [d.reservaId, d.usuarioId, d.valor, d.tipo, d.metodo, d.referencia, d.estado],
+      `INSERT INTO pago (reserva_id, usuario_id, valor, tipo, metodo, referencia, estado, equipo_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [d.reservaId, d.usuarioId, d.valor, d.tipo, d.metodo, d.referencia, d.estado, d.equipoId ?? null],
       db,
     );
     return (await this.obtenerPago(fila!.id, db))!;
@@ -90,9 +91,18 @@ export const paymentsRepository = {
     return filas.map(aPago);
   },
 
-  /** HU-12.3: lo pagado se traslada a la nueva reserva. */
+  /** HU-12.3: lo pagado por el dueño se traslada a la nueva reserva (lo del rival se le devuelve). */
   async moverPagosAprobados(desdeReservaId: number, haciaReservaId: number, db: Queryable): Promise<void> {
-    await query("UPDATE pago SET reserva_id = $2 WHERE reserva_id = $1 AND estado = 'aprobado'", [desdeReservaId, haciaReservaId], db);
+    // Lo perdido por un equipo que salió también es pago de la reserva: se traslada con ella.
+    await query("UPDATE pago SET reserva_id = $2 WHERE reserva_id = $1 AND estado = 'aprobado' AND (equipo_id IS NULL OR liquidado)", [desdeReservaId, haciaReservaId], db);
+  },
+
+  /**
+   * Lo que quedó de un equipo que salió del partido deja de ser suyo. Solo los pagos ya aprobados: uno que
+   * sigue en la pasarela se resuelve después y, si se aprueba, se le devuelve completo.
+   */
+  async marcarLiquidados(reservaId: number, equipoId: number, db: Queryable): Promise<void> {
+    await query("UPDATE pago SET liquidado = TRUE WHERE reserva_id = $1 AND equipo_id = $2 AND estado = 'aprobado' AND NOT liquidado", [reservaId, equipoId], db);
   },
 
   /** Un pago puede tener varios reembolsos; su suma nunca supera el valor del pago (disparador de la BD). */

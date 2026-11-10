@@ -187,6 +187,8 @@ export interface ComplejoResumenDto {
   tiposFutbol: number[];
   canchasActivas: number;
   precioDesde: number | null;
+  /** HU-30.3 */
+  calificacion: { promedio: number; total: number } | null;
 }
 
 export interface CanchaDto {

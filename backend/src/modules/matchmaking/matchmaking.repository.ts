@@ -24,6 +24,10 @@ export interface PartidoFila {
   estado: EstadoPartido;
   goles_publicador: number | null;
   goles_rival: number | null;
+  marcador_conf_publicador: boolean;
+  marcador_conf_rival: boolean;
+  fecha_rival_confirmado: Date | null;
+  alerta_sin_rival_enviada: boolean;
   fecha_publicacion: Date;
 }
 
@@ -119,8 +123,8 @@ export const matchmakingRepository = {
 
   /** HU-23.3: últimos resultados del equipo. */
   ultimosResultados(equipoId: number, limite = 5) {
-    return query<{ id: number; equipo_publicador_id: number; equipo_rival_id: number; goles_publicador: number | null; goles_rival: number | null; fecha_publicacion: Date }>(
-      `SELECT id, equipo_publicador_id, equipo_rival_id, goles_publicador, goles_rival, fecha_publicacion FROM partido_abierto
+    return query<{ id: number; equipo_publicador_id: number; equipo_rival_id: number; goles_publicador: number | null; goles_rival: number | null; fecha_publicacion: Date; reserva_id: number | null }>(
+      `SELECT id, equipo_publicador_id, equipo_rival_id, goles_publicador, goles_rival, fecha_publicacion, reserva_id FROM partido_abierto
         WHERE (equipo_publicador_id = $1 OR equipo_rival_id = $1) AND estado = 'jugado'
         ORDER BY fecha_publicacion DESC LIMIT $2`,
       [equipoId, limite],
@@ -161,6 +165,56 @@ export const matchmakingRepository = {
     await query("UPDATE partido_abierto SET estado = 'jugado' WHERE id = $1", [id], db);
   },
 
+  /** HU-26.2: rivales confirmados antes de `limite` (posibles morosos). */
+  async rivalesConfirmadosAntesDe(limite: Date): Promise<PartidoFila[]> {
+    return (await query<PartidoFila>("SELECT * FROM partido_abierto WHERE estado = 'rival_confirmado' AND fecha_rival_confirmado <= $1 ORDER BY id LIMIT 500", [limite])).map(normalizar);
+  },
+
+  /** HU-22.3: partidos que aún buscan rival y no han recibido la alerta. */
+  async buscandoSinAlerta(): Promise<PartidoFila[]> {
+    return (await query<PartidoFila>("SELECT * FROM partido_abierto WHERE estado = 'buscando' AND modalidad = 'busco_rival' AND NOT alerta_sin_rival_enviada")).map(normalizar);
+  },
+
+  /** Devuelve false si otra ejecución ya la marcó (la alerta sale una sola vez). */
+  async marcarAlertaEnviada(id: number): Promise<boolean> {
+    return (await query('UPDATE partido_abierto SET alerta_sin_rival_enviada = TRUE WHERE id = $1 AND NOT alerta_sin_rival_enviada RETURNING id', [id])).length > 0;
+  },
+
+  /** HU-31.4 */
+  async guardarMarcador(id: number, goles: { publicador: number; rival: number }, conf: { publicador: boolean; rival: boolean }, db: Queryable): Promise<void> {
+    await query(
+      'UPDATE partido_abierto SET goles_publicador = $2, goles_rival = $3, marcador_conf_publicador = $4, marcador_conf_rival = $5 WHERE id = $1',
+      [id, goles.publicador, goles.rival, conf.publicador, conf.rival],
+      db,
+    );
+  },
+
+  /** RN-07 / RN-08: una por equipo y partido. Devuelve false si ya estaba registrada. */
+  async registrarInasistencia(equipoId: number, partidoId: number, db: Queryable): Promise<boolean> {
+    const filas = await query('INSERT INTO inasistencia_equipo (equipo_id, partido_abierto_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id', [equipoId, partidoId], db);
+    return filas.length > 0;
+  },
+
+  async fechasInasistencia(equipoId: number, db: Queryable): Promise<Date[]> {
+    return (await query<{ fecha: Date }>('SELECT fecha FROM inasistencia_equipo WHERE equipo_id = $1 AND cuenta', [equipoId], db)).map((f) => f.fecha);
+  },
+
+  /** RN-08: las inasistencias que causaron una suspensión ya se cumplieron con ella. */
+  async consumirInasistencias(equipoId: number, db: Queryable): Promise<void> {
+    await query('UPDATE inasistencia_equipo SET cuenta = FALSE WHERE equipo_id = $1 AND cuenta', [equipoId], db);
+  },
+
+  async partidoDeReserva(reservaId: number): Promise<PartidoFila | undefined> {
+    const f = await queryOne<PartidoFila>(`SELECT * FROM partido_abierto WHERE reserva_id = $1 AND estado IN ${ESTADOS_ACTIVOS}`, [reservaId]);
+    return f && normalizar(f);
+  },
+
+  /** Partidos de varias reservas, en cualquier estado (panel del complejo). */
+  async idsPorReservas(reservaIds: number[]): Promise<number[]> {
+    if (!reservaIds.length) return [];
+    return (await query<{ id: number }>('SELECT id FROM partido_abierto WHERE reserva_id = ANY($1::bigint[])', [reservaIds])).map((f) => f.id);
+  },
+
   /** Reconciliación: partidos activos con su reserva. */
   activosConReserva() {
     return query<{ id: number; reserva_id: number }>(`SELECT id, reserva_id FROM partido_abierto WHERE reserva_id IS NOT NULL AND estado IN ${ESTADOS_ACTIVOS}`);
@@ -177,7 +231,14 @@ export const matchmakingRepository = {
 
   /** El rival confirmado se retira: el partido vuelve a buscar rival. */
   async liberarRival(id: number, equipoId: number, db: Queryable): Promise<void> {
-    await query("UPDATE partido_abierto SET estado = 'buscando', equipo_rival_id = NULL, fecha_rival_confirmado = NULL WHERE id = $1", [id], db);
+    // En "sin cancha" la reserva era del rival: se va con él.
+    await query(
+      `UPDATE partido_abierto SET estado = 'buscando', equipo_rival_id = NULL, fecha_rival_confirmado = NULL,
+              reserva_id = CASE WHEN modalidad = 'busco_partido_sin_cancha' THEN NULL ELSE reserva_id END
+        WHERE id = $1`,
+      [id],
+      db,
+    );
     await query("UPDATE postulacion_rival SET estado = 'anulada' WHERE partido_abierto_id = $1 AND equipo_id = $2 AND estado = 'aceptada'", [id, equipoId], db);
   },
 
