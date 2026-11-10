@@ -260,7 +260,7 @@ Describen el trabajo de infraestructura que no ve el usuario final pero que hace
 | Código | Historia técnica | Prioridad | Pts | Sprint |
 |---|---|---|---|---|
 | HT-01 | **Repositorio y estructura del proyecto.** Repositorio Git con carpetas `/frontend`, `/backend`, `/database` y `/docs` (estructura en [`docs/estructura.md`](docs/estructura.md)), README con instrucciones, ramas `main`, `develop` y `feature/HU-XX`, y variables sensibles en `.env` fuera del repositorio. | Alta | 2 | 1 |
-| HT-02 | **Base de datos relacional y migraciones.** Implementar las 28 entidades del modelo E-R en migraciones SQL numeradas (`database/migrations`, ordenadas por las dependencias entre tablas) con llaves primarias, foráneas y restricciones; validación contra reservas cruzadas (RN-01); índices en fecha, cancha, ciudad y estado; script de datos de prueba (seed). | Alta | 5 | 1 |
+| HT-02 | **Base de datos relacional y migraciones.** Implementar las 29 entidades del modelo E-R en migraciones SQL numeradas (`database/migrations`, ordenadas por las dependencias entre tablas) con llaves primarias, foráneas y restricciones; validación contra reservas cruzadas (RN-01); índices en fecha, cancha, ciudad y estado; script de datos de prueba (seed). | Alta | 5 | 1 |
 | HT-03 | **API REST por capas y documentación.** Rutas, controladores, servicios y repositorios dentro de cada módulo; respuestas JSON, documentación Swagger / OpenAPI (`backend/openapi.yaml`) y códigos HTTP correctos (400, 401, 403, 404, 409, 500). | Alta | 5 | 1 |
 | HT-04 | **Autenticación y autorización por roles.** Contraseñas con bcrypt, tokens JWT con expiración de 2 horas, validación de rol en cada endpoint y bloqueo de 15 minutos tras 5 intentos fallidos. | Alta | 5 | 1 |
 | HT-10 | **Frontend responsive y componentes reutilizables.** Componentes de formularios, tarjetas de cancha, grilla de horarios y notificaciones; vistas para 360, 768 y 1280 px; rutas privadas protegidas. | Alta | 5 | 1 |
@@ -279,7 +279,7 @@ Describen el trabajo de infraestructura que no ve el usuario final pero que hace
  
 ## 5. Modelado de la base de datos (Diagrama Entidad-Relación)
  
-Modelo entidad-relación **lógico** con **28 entidades y 46 relaciones**. Cada tabla muestra sus campos con tipo de dato y marca las llaves: `PK` llave primaria, `FK` llave foránea y `UK` valor único (un campo en cursiva admite `NULL`). Las relaciones se dibujan en notación de pata de gallo, y cada tabla está coloreada según la épica de la que nace.
+Modelo entidad-relación **lógico** con **29 entidades y 48 relaciones**. Cada tabla muestra sus campos con tipo de dato y marca las llaves: `PK` llave primaria, `FK` llave foránea y `UK` valor único (un campo en cursiva admite `NULL`). Las relaciones se dibujan en notación de pata de gallo, y cada tabla está coloreada según la épica de la que nace.
  
 ![Diagrama Entidad-Relación de CanchaYa](docs/modelo-er.png)
  
@@ -296,10 +296,10 @@ El archivo editable está en [`docs/CanchaYa_Modelo_Entidad_Relacion.drawio`](do
 | EP-05 · Equipos | Equipo, MiembroEquipo, InvitacionEquipo |
 | EP-06 · Busca Equipo / Busca Partido | PartidoAbierto, PostulacionRival, InscripcionJugador, MensajePartido |
 | EP-07 · Notificaciones y alertas | Notificacion, PreferenciaAlerta |
-| EP-08 · Calificaciones y reputación | CalificacionComplejo, CalificacionEquipo |
+| EP-08 · Calificaciones y reputación | CalificacionComplejo, CalificacionEquipo, InasistenciaEquipo |
 | EP-09 · Administración de la plataforma | ReporteUsuario, ParametroSistema |
  
-Total: 3 + 8 + 2 + 2 + 3 + 4 + 2 + 2 + 2 = **28 entidades**.
+Total: 3 + 8 + 2 + 2 + 3 + 4 + 2 + 3 + 2 = **29 entidades**.
  
 ### Relaciones principales
  
@@ -426,7 +426,7 @@ CanchaYa/
 | 1 | Usuarios (HU-01 a HU-04), complejos, canchas, horarios, tarifas y bloqueos (HU-05 a HU-09), HT-01 a HT-04, HT-10 | Terminado |
 | 2 | Reservas (HU-10 a HU-14), pagos (HU-16, HU-17), cancelación y reprogramación (HU-12), reembolsos (HU-18), HT-05, HT-06, HT-08 | Terminado |
 | 3 | Equipos (HU-19 a HU-21) y Busca Partido: publicar, explorar, postularse, completar jugadores (HU-22 a HU-25) | Terminado |
-| 4 | Pagos divididos, notificaciones y reputación. Incluye lo que depende de ellas: avisos de Busca Partido (HU-12.4, HU-20.2, HU-24.1), alerta de 6 horas (HU-22.3) y acumulación de inasistencias (RN-07, RN-08) | Pendiente |
+| 4 | Pago dividido entre equipos (HU-26), notificaciones en la plataforma y por correo con campana y alertas de partidos (HU-28, HU-29, HT-07), calificación de complejos, fair play, inasistencias y marcador (HU-30, HU-31). Incluye los avisos de Busca Partido (HU-12.4, HU-20.2, HU-24.1), la alerta de 6 horas (HU-22.3), la suspensión por inasistencias (RN-07, RN-08) y que el complejo pueda mover una reserva con motivo (HU-28.3) | Terminado |
 | 5 | Reserva recurrente, chat, reportes y administración | Pendiente |
 
 ### Con Docker
@@ -469,6 +469,20 @@ La pasarela de pagos es **simulada** (detrás de la interfaz `PaymentGateway`, l
 
 Una reserva sin pago se retiene 15 minutos (RN-02); una tarea programada la expira cada minuto.
 
+En Busca Partido el valor se divide entre los dos equipos (50 % o el porcentaje acordado al publicar). El rival tiene 2 horas para pagar su abono desde que queda confirmado; si no lo hace, pierde la confirmación y se le devuelve lo que alcanzó a pagar. Si el dueño de la reserva la cancela o la reprograma, al rival se le devuelve el 100 % de lo que pagó y se le avisa.
+
+### Tareas programadas (HT-06)
+
+Corren cada minuto dentro del backend y son idempotentes (se pueden repetir sin duplicar efectos):
+
+| Tarea | Qué hace |
+|---|---|
+| `expirar-reservas` | Libera las reservas sin pago vencidas (RN-02). |
+| `sincronizar-partidos` | Cierra los partidos cuya reserva ya terminó. |
+| `recordatorios` | Recordatorio 2 horas antes del partido (HU-28.2) y alerta de partido sin rival 6 horas antes (HU-22.3). |
+| `anular-confirmacion-rival` | Anula al rival que no pagó su abono en 2 horas (HU-26.2). |
+| `levantar-suspensiones` | Levanta las suspensiones de equipos vencidas (RN-08). |
+
 ### Cuentas de prueba (seed)
 
 Todas usan la contraseña `CanchaYa2026`. Solo existen si se ejecuta `npm run seed`.
@@ -494,7 +508,7 @@ cd ../frontend && npm run build # tipos y compilación
 
 ### Cambios respecto al modelo E-R
 
-Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el diagrama los incluye:
+Se agregaron estos campos de soporte y una entidad (`InasistenciaEquipo`); el diagrama los incluye:
 
 | Tabla | Campo | Para qué |
 |---|---|---|
@@ -506,5 +520,9 @@ Se agregaron estos campos de soporte (no cambian entidades ni relaciones); el di
 | Equipo | `capitan_propuesto_id` | HU-21.2: la capitanía cambia cuando el otro miembro acepta (migración `012`). |
 | PartidoAbierto | `posicion_deseada`; `reserva_id` único solo entre partidos no cancelados | HU-25.1, republicar una reserva y HU-22.4 (migraciones `012` y `013`). |
 | Reembolso | `pago_id` deja de ser único | HU-12 / HU-18: un pago puede tener varios reembolsos (p. ej. la diferencia de una reprogramación y luego la cancelación); un disparador impide que sumen más que el pago (migración `011`). |
+| Equipo | `cancelaciones_tardias` | HU-26.3: marca al rival que se retira con menos de 6 horas (migración `014`). |
+| InasistenciaEquipo (nueva) | `equipo_id`, `partido_abierto_id`, `fecha` | RN-08 cuenta las inasistencias de los últimos 60 días, así que cada una necesita su fecha; una por equipo y partido (migración `014`). |
+| Pago | `liquidado` | HU-26.3: lo que pierde un equipo al salir del partido sigue siendo pago de la reserva, pero ya no es suyo ni del dueño, así que nunca se le devuelve por excedentes o reprogramaciones (migración `015`). |
+| InasistenciaEquipo | `cuenta` | RN-08: las inasistencias que ya causaron una suspensión no cuentan para la siguiente (migración `015`). |
 
 ---

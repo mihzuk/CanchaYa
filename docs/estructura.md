@@ -21,7 +21,7 @@ Para entender el porqué de la organización, ver [`arquitectura.md`](arquitectu
 | 4 | Pagos divididos, reembolsos, notificaciones y reputación | Migraciones 007-008; `modules/notifications`, `modules/ratings`; `infrastructure/email` |
 | 5 | Recurrentes, chat, reportes y administración | Migración 009; `modules/admin`; `infrastructure/realtime`; reserva recurrente |
 
-> Crear las migraciones de cada sprint cuando se necesiten es más seguro que crear las 28 tablas en el Sprint 1. Si el equipo prefiere crearlas todas de una vez (HT-02), el orden de los archivos ya respeta las dependencias.
+> Crear las migraciones de cada sprint cuando se necesiten es más seguro que crear las 29 tablas en el Sprint 1. Si el equipo prefiere crearlas todas de una vez (HT-02), el orden de los archivos ya respeta las dependencias.
 
 ## Base de datos (`database/`)
 
